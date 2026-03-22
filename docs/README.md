@@ -9,7 +9,7 @@ docs/
 ├── plan/
 │   └── implementation.md   # Step-by-step implementation plan (added when ready)
 ├── guides/                 # Learning guides added as we build each phase
-│   └── (empty for now)
+│   └── cmake-intro.md      # CMake concepts for Phase 1
 └── README.md               # This file
 ```
 

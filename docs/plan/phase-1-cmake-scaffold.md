@@ -105,13 +105,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(httplib)
 
-# ── Catch2 v3 (testing) ───────────────────────────────────
+# ── GoogleTest (testing) ──────────────────────────────────
 FetchContent_Declare(
-    Catch2
-    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v3.7.1
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
 )
-FetchContent_MakeAvailable(Catch2)
+FetchContent_MakeAvailable(googletest)
 
 # ── SFML 2.6 ──────────────────────────────────────────────
 # Note: SFML needs system libs. On Ubuntu/Debian:
@@ -129,7 +129,7 @@ FetchContent_MakeAvailable(SFML)
 FetchContent_Declare(
     PokerHandEvaluator
     GIT_REPOSITORY https://github.com/HenryRLee/PokerHandEvaluator.git
-    GIT_TAG        master
+    GIT_TAG        v0.5.3.1
 )
 FetchContent_Populate(PokerHandEvaluator)   # downloads but does NOT call add_subdirectory
 # We wire it manually in Task 1.5
@@ -142,33 +142,37 @@ FetchContent_Populate(PokerHandEvaluator)   # downloads but does NOT call add_su
 
 ### Task 1.5: Custom CMake wrapper for PokerHandEvaluator
 
-**Concept:** Some libraries don't have CMake support. You'll wrap them manually — this is a real-world CMake skill.
+**Concept:** Some libraries don't have a CMakeLists.txt at their repo root (PokerHandEvaluator keeps its in `cpp/`). When that's the case, `FetchContent_MakeAvailable` won't work out of the box. `FetchContent_Populate` gives you the source directory so you can define the target yourself.
 
-PokerHandEvaluator is a C library. We need to tell CMake how to compile it.
+The C sources live in `cpp/src/` and the headers in `cpp/include/`.
 
 - [ ] After `FetchContent_Populate(PokerHandEvaluator)`, add this to `cmake/Dependencies.cmake`:
 
 ```cmake
 # PokerHandEvaluator: manual library target
 # FetchContent_Populate lowercases the name → variable is pokerevaluator_SOURCE_DIR
-# We name the target poker_hand_evaluator (different from the FetchContent name)
-# to avoid conflicts with CMake's internal registration.
 add_library(poker_hand_evaluator STATIC
-    ${pokerevaluator_SOURCE_DIR}/c/src/evaluator5.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/evaluator6.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/evaluator7.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/hash.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/hashtable.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/hashtable5.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/hashtable6.c
-    ${pokerevaluator_SOURCE_DIR}/c/src/hashtable7.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/evaluator7.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/dptables.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/tables_bitwise.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/hash.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/hashtable.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/hashtable5.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/hashtable6.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/hashtable7.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/7462.c
+    ${pokerevaluator_SOURCE_DIR}/cpp/src/rank.c
 )
 target_include_directories(poker_hand_evaluator PUBLIC
-    ${pokerevaluator_SOURCE_DIR}/include
+    ${pokerevaluator_SOURCE_DIR}/cpp/include
 )
 ```
 
-**Your turn:** Look up what `add_library(... STATIC ...)` means vs `SHARED`. Why do we use `STATIC` here?
+**Why `STATIC`?** A static library (`.a`) gets copied into the final binary at link time. No `.so` file to ship alongside the executable. Look up `STATIC` vs `SHARED` and be able to explain the tradeoff.
+
+**Why only `evaluator7.c` and not 5/6?** Texas Hold'em always evaluates 7 cards (2 hole + 5 community). The 5- and 6-card evaluators are standalone variants we don't need. Including only what you use is good practice.
+
+**Why that `_SOURCE_DIR` variable name?** `FetchContent_Populate` lowercases the declared name when creating variables. `PokerHandEvaluator` becomes `pokerevaluator` (strips non-alphanumeric), giving `${pokerevaluator_SOURCE_DIR}`.
 
 - [ ] Add the block above to `cmake/Dependencies.cmake`
 
@@ -202,12 +206,10 @@ target_link_libraries(texas-holdem PRIVATE
 - [ ] Create `tests/CMakeLists.txt`:
 
 ```cmake
-# Catch2 provides a helper to register tests with CTest.
-# We must add Catch2's extras directory to CMAKE_MODULE_PATH so
-# include(Catch) can find the catch_discover_tests() function.
+# GoogleTest provides gtest_discover_tests() via the GoogleTest module.
+# FetchContent_MakeAvailable(googletest) makes it available automatically.
 include(CTest)
-list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
-include(Catch)
+include(GoogleTest)
 
 # Sub-test directories — uncomment as we add tests
 # add_subdirectory(core)

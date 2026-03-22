@@ -1,0 +1,61 @@
+# Build output
+build/
+out/
+
+# CMake generated files (in-source build accidents)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+Makefile
+*.cmake
+!cmake/Dependencies.cmake
+
+# Compiled binaries and libraries
+*.o
+*.a
+*.so
+*.so.*
+*.dylib
+*.dll
+*.exe
+
+# IDE and editor
+.vscode/
+.idea/
+*.suo
+*.user
+*.sln
+*.vcxproj
+*.vcxproj.filters
+.vs/
+*.code-workspace
+*.clangd
+.clangd/
+compile_commands.json
+
+# CLion
+cmake-build-*/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Linux
+*~
+.nfs*
+
+# Assets — keep the directory, ignore large binaries if added later
+assets/cards/*.png
+assets/fonts/*.ttf
+assets/fonts/*.otf
+
+# Config — keep examples, ignore local overrides
+config/game.local.yaml
+
+# Logs and crash dumps
+*.log
+core
+core.*

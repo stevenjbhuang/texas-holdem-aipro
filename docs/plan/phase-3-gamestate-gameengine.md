@@ -3,7 +3,7 @@
 **Concepts you'll learn:** State machines, STL containers (`std::map`, `std::vector`, `std::set`), const-correctness, threading primitives (`std::mutex`).
 
 **Previous phase:** [Phase 2 — Core Types, Card, Deck, Hand](phase-2-core-types-card-deck-hand.md)
-**Next phase:** [Phase 4 — Core Tests with Catch2](phase-4-core-tests.md)
+**Next phase:** [Phase 4 — Core Tests with GoogleTest](phase-4-core-tests.md)
 
 ---
 
@@ -191,33 +191,110 @@ public:
 
 ```cpp
 #include "HandEvaluator.hpp"
-#include <phevaluator/phevaluator.h>  // PokerHandEvaluator header
+#include <phevaluator/phevaluator.h>  // PokerHandEvaluator C header
 
 namespace poker {
 
-// Helper: convert our Card to the library's card integer
+// Helper: convert our Card to the library's integer id (rank * 4 + suit).
+// The library expects: rank 0=Two .. 12=Ace, suit 0=Club .. 3=Spade.
+// Adjust the cast if your Rank/Suit enums use different underlying values.
 static int toLibCard(const Card& c) {
-    // The library uses: rank * 4 + suit (0-indexed)
-    int rank = static_cast<int>(c.getRank()) - 2;  // 0=Two, 12=Ace
-    int suit = static_cast<int>(c.getSuit());       // 0-3
+    int rank = static_cast<int>(c.getRank());  // must be 0-based: Two=0, Ace=12
+    int suit = static_cast<int>(c.getSuit());  // must be 0-based: Club=0, Spade=3
     return rank * 4 + suit;
 }
 
 int HandEvaluator::evaluate(const std::vector<Card>& cards) {
-    // cards must have exactly 7 elements
+    // cards must have exactly 7 elements (2 hole + 5 community)
+    // evaluate_7cards returns int directly — 1=best hand, 7462=worst
     return evaluate_7cards(
         toLibCard(cards[0]), toLibCard(cards[1]),
         toLibCard(cards[2]), toLibCard(cards[3]),
         toLibCard(cards[4]), toLibCard(cards[5]),
         toLibCard(cards[6])
-    ).value;
+    );
 }
 
 bool HandEvaluator::beats(const std::vector<Card>& a, const std::vector<Card>& b) {
-    return evaluate(a) < evaluate(b);  // lower = stronger
+    return evaluate(a) < evaluate(b);  // lower score = stronger hand
 }
 
 } // namespace poker
 ```
 
-**Your turn:** Add `HandEvaluator.cpp` to the core CMakeLists.
+**Your turn:** Add `HandEvaluator.cpp` to the core CMakeLists, and link `poker_hand_evaluator` to the `poker_core` target.
+
+---
+
+### Task 3.6: Upgrade to the C++ interface
+
+Now that you've felt the friction of the C API (raw integers, no types, manual rank/suit mapping), upgrade to the library's own C++ wrapper. This is the same library — you're just switching from the C bindings to the C++ ones that sit on top.
+
+**Step 1 — Update `cmake/Dependencies.cmake`.**
+
+Replace the `FetchContent_Populate` block and the manual `add_library` with:
+
+```cmake
+# Disable the library's own tests/examples to avoid a googletest conflict
+set(BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_PLO5     OFF CACHE BOOL "" FORCE)
+set(BUILD_PLO6     OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    PokerHandEvaluator
+    GIT_REPOSITORY https://github.com/HenryRLee/PokerHandEvaluator.git
+    GIT_TAG        v0.5.3.1
+    SOURCE_SUBDIR  cpp
+)
+FetchContent_MakeAvailable(PokerHandEvaluator)
+# Provides target: pheval
+```
+
+`SOURCE_SUBDIR cpp` tells CMake the CMakeLists.txt lives in `cpp/`, not the repo root. The `BUILD_TESTS OFF` guard prevents the library from fetching its own copy of GoogleTest at a conflicting version.
+
+**Step 2 — Update `src/core/CMakeLists.txt`.**
+
+Change `poker_hand_evaluator` → `pheval` in the `target_link_libraries` call.
+
+**Step 3 — Rewrite `HandEvaluator.cpp`.**
+
+```cpp
+#include "HandEvaluator.hpp"
+#include <phevaluator/phevaluator.h>
+
+namespace poker {
+
+static phevaluator::Card toLibCard(const Card& c) {
+    // phevaluator::Card can be constructed from a two-char string: "Ac", "2d", etc.
+    return phevaluator::Card(c.toString());  // assumes toString() returns e.g. "Ac"
+}
+
+int HandEvaluator::evaluate(const std::vector<Card>& cards) {
+    phevaluator::Rank rank = phevaluator::EvaluateCards(
+        toLibCard(cards[0]), toLibCard(cards[1]),
+        toLibCard(cards[2]), toLibCard(cards[3]),
+        toLibCard(cards[4]), toLibCard(cards[5]),
+        toLibCard(cards[6])
+    );
+    return rank.value();  // int 1-7462
+}
+
+bool HandEvaluator::beats(const std::vector<Card>& a, const std::vector<Card>& b) {
+    return evaluate(a) < evaluate(b);
+}
+
+} // namespace poker
+```
+
+**What changed?**
+- No manual `toLibCard` integer math — `phevaluator::Card("Ac")` handles the encoding
+- `evaluate_7cards(...)` → `phevaluator::EvaluateCards(...)` returning a `Rank` object
+- `rank.value()` gives the same 1–7462 integer; `rank.describeCategory()` gives `"Flush"` etc. for free
+
+**Question to think about:** `phevaluator::Rank::operator<` is defined as `value_ > other.value_` (reversed). Why? What does this let you do with `std::max_element` or `std::sort` without extra comparator lambdas?
+
+- [ ] Make the three changes above, rebuild, verify tests still pass
+- [ ] Commit:
+```bash
+git add -A && git commit -m "refactor(core): upgrade PokerHandEvaluator to C++ interface (pheval)"
+```

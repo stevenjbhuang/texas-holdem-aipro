@@ -76,7 +76,7 @@ The project is **Texas Hold'em AI Pro**, a C++17 poker game with SFML graphics a
 - **Lambda captures**: Event callbacks, async operations
 
 ### CMake & Build System
-- FetchContent for dependency management (Catch2, yaml-cpp, etc.)
+- FetchContent for dependency management (googletest, yaml-cpp, etc.)
 - Target-based CMake (target_link_libraries, target_include_directories)
 - Compiler flags and C++17 standard enforcement
 - Adding new source files to layer CMakeLists.txt
@@ -94,11 +94,11 @@ The project is **Texas Hold'em AI Pro**, a C++17 poker game with SFML graphics a
 - Async LLM calls to avoid blocking the game thread
 - ILLMClient interface and dependency injection for testability
 
-### Testing (Catch2 v3)
+### Testing (GoogleTest)
 - Unit testing pure core logic
 - Mock injection via ILLMClient / IPlayer interfaces
-- TEST_CASE and SECTION structure
-- MockLLMClient pattern for AIPlayer tests
+- TEST(Suite, Name) structure, EXPECT_* vs ASSERT_* macros
+- MockLLMClient pattern for AIPlayer tests (GMock or hand-rolled)
 
 ## Documentation & Resources to Reference
 
@@ -108,7 +108,7 @@ When relevant, point the user to:
 - **CMake documentation** (cmake.org/cmake/help/latest) — FetchContent, target commands
 - **SFML documentation** (sfml-dev.org/documentation) — graphics, window, event APIs
 - **Ollama REST API docs** (ollama.com/docs) — /api/generate, /api/chat endpoints
-- **Catch2 documentation** (github.com/catchorg/Catch2/blob/devel/docs) — test macros, matchers
+- **GoogleTest documentation** (google.github.io/googletest) — test macros, matchers, GMock
 - Project files: `docs/spec/design.md`, `docs/plan/implementation.md`, `src/core/Types.hpp`, `src/players/IPlayer.hpp`
 
 ## Self-Verification Checklist

@@ -74,7 +74,7 @@ ai/          → ILLMClient interface, OllamaClient, PromptBuilder
 - All deps via `FetchContent` — no manual installs (except SFML system libs)
 - SFML needs: `sudo apt install libsfml-dev` for system OpenGL/freetype
 - `yaml-cpp` FetchContent target is `yaml-cpp` (NOT `yaml-cpp::yaml-cpp`)
-- `poker_hand_evaluator` is a manually wrapped C library (see `cmake/Dependencies.cmake`)
+- `poker_hand_evaluator` is a manually wrapped C library (see `cmake/Dependencies.cmake` + Task 1.5)
 - Add new source files to the relevant `CMakeLists.txt` in each layer's directory
 
 ## Threading Model
@@ -86,7 +86,7 @@ ai/          → ILLMClient interface, OllamaClient, PromptBuilder
 
 ## Testing
 
-- Framework: Catch2 v3
+- Framework: GoogleTest (GTest + GMock)
 - `tests/core/` — unit tests for pure game logic (no mocks needed)
 - `tests/players/` — `AIPlayer` with `MockLLMClient` injected via `ILLMClient`
 - `tests/core/MockPlayer.hpp` — mock `IPlayer` for `GameEngine` tests

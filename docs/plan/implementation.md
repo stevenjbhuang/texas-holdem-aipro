@@ -6,7 +6,7 @@
 
 **Architecture:** Three decoupled layers (core / players / ai / ui) communicating through well-defined interfaces. `GameEngine` runs on a worker thread; SFML renders on the main thread.
 
-**Tech Stack:** C++17, CMake 3.21+, SFML 2.6, cpp-httplib, nlohmann/json, yaml-cpp, Catch2 v3, PokerHandEvaluator, Ollama (local LLM)
+**Tech Stack:** C++17, CMake 3.21+, SFML 2.6, cpp-httplib, nlohmann/json, yaml-cpp, GoogleTest, PokerHandEvaluator, Ollama (local LLM)
 
 ---
 
@@ -17,7 +17,7 @@
 | [1](phase-1-cmake-scaffold.md) | CMake Scaffold & Project Structure | CMake, FetchContent, out-of-source builds |
 | [2](phase-2-core-types-card-deck-hand.md) | Core Layer: Types, Card, Deck, Hand | Value types, enum class, operator overloading, PRNG |
 | [3](phase-3-gamestate-gameengine.md) | Core Layer: GameState & GameEngine | State machines, STL containers, const-correctness, mutex |
-| [4](phase-4-core-tests.md) | Core Tests with Catch2 | Unit testing, test design, mock objects |
+| [4](phase-4-core-tests.md) | Core Tests with GoogleTest | Unit testing, test design, mock objects |
 | [5](phase-5-ai-layer.md) | AI Layer: ILLMClient, OllamaClient, PromptBuilder | Interfaces, HTTP clients, JSON, prompt engineering |
 | [6](phase-6-players-layer.md) | Players Layer: IPlayer, HumanPlayer, AIPlayer | Pure virtual interfaces, std::promise/future, std::atomic |
 | [7](phase-7-ui-layer.md) | UI Layer: SFML Setup, Renderer, Input | Game loop, SFML basics, thread-safe rendering |

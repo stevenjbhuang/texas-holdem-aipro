@@ -48,7 +48,7 @@ Three clearly separated layers communicating through well-defined interfaces:
 texas-holdem-aipro/
 ├── CMakeLists.txt
 ├── cmake/
-│   └── Dependencies.cmake          # FetchContent: SFML, nlohmann_json, Catch2, yaml-cpp, cpp-httplib
+│   └── Dependencies.cmake          # FetchContent: SFML, nlohmann_json, googletest, yaml-cpp, cpp-httplib
 ├── config/
 │   ├── game.yaml                   # AI model, hand evaluator, advanced settings
 │   └── personalities/
@@ -364,7 +364,7 @@ Minimal, designed for future extension:
 
 ## Testing Strategy
 
-**Framework:** Catch2 v3 (via CMake FetchContent)
+**Framework:** GoogleTest (GTest + GMock, via CMake FetchContent)
 
 | Test area | What's tested |
 |---|---|
@@ -387,8 +387,8 @@ CMake 3.21+ with `FetchContent` for all dependencies. No manual downloads.
 | nlohmann/json | JSON parsing (Ollama responses) | FetchContent (header-only) |
 | yaml-cpp | Parsing `config/game.yaml` | FetchContent |
 | cpp-httplib | HTTP client for OllamaClient | FetchContent (single-header) |
-| Catch2 v3 | Unit testing | FetchContent |
-| PokerHandEvaluator | Hand strength evaluation | FetchContent with custom CMake wrapper (Phase 1 exercise) |
+| GoogleTest | Unit testing (GTest + GMock) | FetchContent |
+| PokerHandEvaluator | Hand strength evaluation | FetchContent with manual CMake wrapper (Phase 1); upgraded to C++ interface (`pheval`) in Phase 3 |
 
 **Note on SFML system deps:** SFML source is fetched by CMake, but it links against system libraries (OpenGL, freetype, etc.) that must be installed separately. Linux: `sudo apt install libsfml-dev` installs all prerequisites.
 
@@ -400,7 +400,7 @@ CMake 3.21+ with `FetchContent` for all dependencies. No manual downloads.
 |---|---|
 | 1 | CMake scaffold, project structure, FetchContent for all deps including PokerHandEvaluator wrapper |
 | 2 | Core layer: Types, Card, Deck, Hand, GameState, GameEngine (no UI, no AI) |
-| 3 | Core layer tests with Catch2 — GameEngine state machine, betting round logic |
+| 3 | Core layer tests with GoogleTest — GameEngine state machine, betting round logic |
 | 4 | AI layer: ILLMClient, OllamaClient (cpp-httplib), PromptBuilder + personality .md files |
 | 5 | Players layer: IPlayer, HumanPlayer (promise/future), AIPlayer (uses ILLMClient) |
 | 6 | Players layer tests: AIPlayer with MockLLMClient |

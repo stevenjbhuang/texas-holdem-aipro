@@ -1,37 +1,39 @@
-# Phase 4 — Core Tests with Catch2
+# Phase 4 — Core Tests with GoogleTest
 
-**Concepts you'll learn:** Unit testing philosophy, test-first thinking, Catch2 syntax, testing state machines, mock objects.
+**Concepts you'll learn:** Unit testing philosophy, test-first thinking, GoogleTest syntax, testing state machines, mock objects.
 
 **Previous phase:** [Phase 3 — GameState & GameEngine](phase-3-gamestate-gameengine.md)
 **Next phase:** [Phase 5 — AI Layer](phase-5-ai-layer.md)
 
 ---
 
-### Task 4.1: Understand Catch2 syntax
+### Task 4.1: Understand GoogleTest syntax
 
-Catch2 tests look like this:
+GoogleTest tests look like this:
 
 ```cpp
-#include <catch2/catch_test_macros.hpp>
+#include <gtest/gtest.h>
 
-TEST_CASE("Deck deals 52 unique cards", "[deck]") {
+TEST(DeckTest, Deals52UniqueCards) {
     poker::Deck deck;
     deck.shuffle();
 
     std::set<std::string> seen;
     for (int i = 0; i < 52; i++) {
         auto card = deck.deal();
-        REQUIRE(seen.find(card.toString()) == seen.end());  // no duplicates
+        EXPECT_EQ(seen.find(card.toString()), seen.end());  // no duplicates
         seen.insert(card.toString());
     }
-    REQUIRE_THROWS(deck.deal());  // 53rd deal throws
+    EXPECT_THROW(deck.deal(), std::out_of_range);  // 53rd deal throws
 }
 ```
 
-- `TEST_CASE("name", "[tag]")` — defines a test
-- `REQUIRE(expr)` — fails and stops test if false
-- `CHECK(expr)` — fails but continues test if false
-- `REQUIRE_THROWS(expr)` — passes if expression throws
+- `TEST(SuiteName, TestName)` — defines a test; suite groups related tests
+- `EXPECT_*(expr)` — fails but continues the test if the condition is not met
+- `ASSERT_*(expr)` — fails and stops the test immediately
+- `EXPECT_EQ(a, b)`, `EXPECT_TRUE(x)`, `EXPECT_THROW(expr, ExcType)` — common matchers
+
+**`EXPECT_` vs `ASSERT_`:** prefer `EXPECT_` unless a failure makes subsequent lines meaningless (e.g., a null pointer dereference would follow).
 
 ---
 
@@ -48,12 +50,12 @@ add_executable(core_tests
 )
 
 target_link_libraries(core_tests PRIVATE
-    core
-    Catch2::Catch2WithMain
+    poker_core
+    GTest::gtest_main
 )
 
-# CTest and Catch are already set up in the parent tests/CMakeLists.txt
-catch_discover_tests(core_tests)
+# Registers each TEST() with CTest automatically
+gtest_discover_tests(core_tests)
 ```
 
 - [ ] Uncomment `add_subdirectory(core)` in `tests/CMakeLists.txt`
@@ -131,5 +133,5 @@ Expected: all tests pass.
 
 - [ ] Commit:
 ```bash
-git add -A && git commit -m "test(core): add Catch2 tests for Card, Deck, HandEvaluator, GameEngine"
+git add -A && git commit -m "test(core): add GoogleTest tests for Card, Deck, HandEvaluator, GameEngine"
 ```
