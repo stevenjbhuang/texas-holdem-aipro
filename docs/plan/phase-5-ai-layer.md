@@ -188,3 +188,57 @@ cmake --build build -j$(nproc)
 ```bash
 git add -A && git commit -m "feat(ai): add ILLMClient, OllamaClient, PromptBuilder, personality configs"
 ```
+
+---
+
+## Evaluation
+
+Run `/phase-verify` to compile and get automated feedback on your implementation.
+
+### Build checklist
+
+```bash
+# 1. Configure (if not already done, or after new CMakeLists files were added)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+# 2. Build — the ai static library must compile cleanly
+cmake --build build -j$(nproc)
+```
+
+Success looks like:
+- `cmake --build` exits with code `0`
+- The build output includes a line compiling `libai.a` (or similar), confirming the `ai` library target was built
+- No `undefined reference` errors — means `nlohmann_json` and `httplib` were linked correctly
+- The personality config files exist at their expected paths:
+  - `config/personalities/default.md`
+  - `config/personalities/aggressive.md`
+  - `config/personalities/cautious.md`
+
+If you see `No rule to make target 'ai'`, confirm `add_subdirectory(ai)` is present in `src/CMakeLists.txt`. If httplib linking fails, try the fallback `target_include_directories` noted in the CMakeLists scaffold.
+
+### Concept checklist
+
+- [ ] Does `ILLMClient` have a virtual destructor declared as `virtual ~ILLMClient() = default`?
+- [ ] Is `sendPrompt` declared as a pure virtual method (`= 0`) in `ILLMClient`, not just `virtual`?
+- [ ] Does `OllamaClient` use `override` on `sendPrompt` (not just re-declare it identically)?
+- [ ] Does `OllamaClient::sendPrompt` return an empty string on HTTP error rather than throwing?
+- [ ] Does `PromptBuilder::build` omit other players' hole cards — only `state.holeCards[ownId]` is included?
+- [ ] Is `PromptBuilder::build` a `static` method (no instance required to call it)?
+- [ ] Are `yaml-cpp` and SFML headers absent from `src/ai/` — does the `ai` library have zero dependency on them?
+- [ ] Did you write distinct personality files (not just copies of `default.md` with the name changed)?
+
+### Common mistakes
+
+| Mistake | Symptom | Fix |
+|---|---|---|
+| Using `yaml-cpp::yaml-cpp` as the link target | CMake error: `target 'yaml-cpp::yaml-cpp' not found` | The FetchContent target is `yaml-cpp` (no namespace). Also: yaml-cpp belongs in `main.cpp`, not in the `ai` library at all |
+| Missing virtual destructor on `ILLMClient` | Deleting an `OllamaClient` via an `ILLMClient*` silently leaks memory or causes UB; no compile error | Always add `virtual ~ILLMClient() = default` to every interface class |
+| Including other players' hole cards in the prompt | AI has perfect information and always plays optimally — the game is not interesting to play against | Only access `state.holeCards[ownId]` inside `PromptBuilder::build`; other entries must not appear in the output string |
+| Parsing `m_endpoint` incorrectly for httplib's `Client` | Runtime crash or `httplib::Client` connects to wrong host/port | `httplib::Client` takes host and port separately; split on `:` and parse the port as an integer |
+| Linking `httplib` or `nlohmann_json` with wrong target name | CMake error: `target 'httplib' not found` | Check the FetchContent target names in `cmake/Dependencies.cmake`; use the fallback include directory method if the exported target name differs |
+
+### Self-score
+
+- **Solid**: `libai.a` compiled first try. You can explain why a virtual destructor is necessary and why `yaml-cpp` is excluded from this library. Prompt output is readable and omits opponents' cards.
+- **Learning**: Built after 1-2 CMake target name fixes or a link error. You looked up how to split a URL string or how `httplib::Client` takes its arguments. Most checklist boxes checked after a second pass.
+- **Needs review**: Multiple linker errors, wrong target names, or the `ai` subdirectory was never registered. Go back to Task 5.1, re-read the interface design concept box and the CMake notes in `CLAUDE.md`, then revisit the `src/ai/CMakeLists.txt` scaffold carefully before moving to Phase 6.

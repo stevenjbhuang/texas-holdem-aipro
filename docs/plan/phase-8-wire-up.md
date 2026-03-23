@@ -102,6 +102,63 @@ git add -A && git commit -m "feat: wire up full game loop with threaded GameEngi
 
 ---
 
+## Evaluation
+
+Run `/phase-verify` to compile and get automated feedback on your implementation.
+
+### Build checklist
+
+```bash
+# 1. Configure (if CMakeLists.txt changed)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+# 2. Build — expect zero errors
+cmake --build build -j$(nproc)
+# Success: "Built target texas-holdem" with no undefined reference errors.
+
+# 3. Run all tests — engine threading must not break existing tests
+cd build && ctest --output-on-failure
+# Success: exit code 0, all suites pass.
+
+# 4. Run the game
+./build/texas-holdem
+# Success: SetupScreen appears in a window.
+#          After clicking Start, the table renders with player names and chip counts.
+#          AI players show "Thinking..." while the LLM is queried.
+#          Human player sees Fold/Call/Raise buttons on their turn.
+#          No crash, no deadlock after 3+ full hands.
+```
+
+If Ollama is not running locally, `OllamaClient` should return a fallback action (fold or check) rather than hanging the engine thread indefinitely. Verify this by stopping Ollama and confirming the game still progresses.
+
+### Concept checklist
+
+- [ ] Does `main.cpp` construct objects in dependency order — `OllamaClient` before `AIPlayer`, players before `GameEngine`, engine before the SFML window?
+- [ ] Is `engineThread.join()` called unconditionally (not only on the happy path), so the thread is always cleaned up before `main()` exits?
+- [ ] Is every write to `m_state` inside `GameEngine::tick()` protected by `m_stateMutex`, and does `getStateSnapshot()` lock the same mutex before copying?
+- [ ] Is `getStateSnapshot()` returning a **value** (a full copy of `GameState`), not a reference or pointer into the engine's internal state?
+- [ ] Does the main game loop call `window.pollEvent()` rather than `window.waitEvent()`, so the UI stays responsive while the engine thread is blocked waiting for the AI?
+- [ ] Did I link `yaml-cpp` (not `yaml-cpp::yaml-cpp`) to the `texas-holdem` target as noted in `CLAUDE.md`?
+- [ ] If `config/game.yaml` is missing or malformed, does the program give a readable error message rather than a silent crash or `std::bad_cast`?
+
+### Common mistakes
+
+| Mistake | Symptom | Fix |
+|---|---|---|
+| Calling `engineThread.join()` only in the happy path (e.g., inside `if (!engine.isGameOver())`) | Thread is abandoned on window close; program hangs at exit or terminates with `std::terminate` | Use RAII: wrap the thread in a guard, or place `join()` after the game loop unconditionally — ensure the engine's stop flag is set before joining |
+| Reading `m_state` in `getStateSnapshot()` without locking `m_stateMutex` | Intermittent rendering glitches, torn card/chip values, or data races flagged by `-fsanitize=thread` | Lock `m_stateMutex` in `getStateSnapshot()` for the entire duration of the copy |
+| Using `yaml-cpp::yaml-cpp` as the CMake link target instead of `yaml-cpp` | CMake configure error: `CMake Error: target 'yaml-cpp::yaml-cpp' not found` | Use the plain target name `yaml-cpp` as documented in `CLAUDE.md` and the phase task |
+| Constructing `sf::RenderWindow` before entering the main-thread loop (e.g., on a background thread or in a helper constructor) | Crash or blank window on Linux; SFML OpenGL context must be created on the thread that will call `display()` | Keep window construction and all `window.*` calls on the main thread |
+| Not setting an engine stop flag before calling `join()` when the window closes early | `join()` blocks forever because the engine thread is waiting on `IPlayer::getAction()` | Add a `std::atomic<bool> m_stopRequested` to `GameEngine`; check it in `tick()` and signal it before `join()` |
+
+### Self-score
+
+- **Solid**: game launched first try, cards dealt, AI takes turns, human buttons work, `join()` is unconditional, mutex guards all state access.
+- **Learning**: needed 1–2 fixes (wrong yaml-cpp target, forgot to join on early exit), game fully playable after corrections.
+- **Needs review**: persistent deadlock, data race warnings from the sanitizer, or game crashes mid-hand — revisit the threading model section of `CLAUDE.md` and the mutex concept box before moving on.
+
+---
+
 ## Reference: Build & Test Commands
 
 ```bash

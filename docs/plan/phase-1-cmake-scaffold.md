@@ -246,3 +246,49 @@ Expected: exits immediately with code 0 (main returns 0), no crash.
 ```bash
 git add -A && git commit -m "chore: wire up CMake with all dependencies via FetchContent"
 ```
+
+---
+
+## Evaluation
+
+Run `/phase-verify` to compile and get automated feedback on your implementation.
+
+### Build checklist
+
+| Step | Command | Success looks like |
+|---|---|---|
+| Configure | `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug` | Ends with `-- Build files have been written to: .../build` — no CMake errors, FetchContent download logs are fine |
+| Build | `cmake --build build -j$(nproc)` | Ends with `[100%]` and no errors; linker produces `build/texas-holdem` |
+| Smoke run | `./build/texas-holdem` | Exits immediately; `echo $?` prints `0` |
+| CMake targets exist | `cmake --build build --target help \| grep poker` | Should show `poker_core`, `poker_hand_evaluator` (or `pheval`) in the list |
+
+A clean configure + build with no warnings in your own CMake files (warnings from downloaded deps are acceptable) counts as passing.
+
+### Concept checklist
+
+Answer these honestly about your own files before moving on:
+
+- [ ] Do I understand why `cmake -S . -B build` puts generated files in `build/` instead of the source tree?
+- [ ] Can I explain the difference between `add_library`, `add_executable`, and `target_link_libraries` without looking them up?
+- [ ] Did I use `PRIVATE` in `target_link_libraries` for the main executable, and do I know when `PUBLIC` would be needed instead?
+- [ ] Does `src/CMakeLists.txt` reference `main.cpp` (not `src/main.cpp`) because that file is already inside `src/`?
+- [ ] Did I use `include(cmake/Dependencies.cmake)` in the root `CMakeLists.txt` rather than copy-pasting the FetchContent calls inline?
+- [ ] Do I understand why `FetchContent_Populate` was used for PokerHandEvaluator instead of `FetchContent_MakeAvailable`?
+- [ ] Can I explain what `${pokerevaluator_SOURCE_DIR}` contains and why the variable name is lowercased?
+- [ ] Do I know what `CMAKE_CXX_EXTENSIONS OFF` prevents (gnu++17 vs c++17)?
+
+### Common mistakes
+
+| Mistake | Symptom | Fix |
+|---|---|---|
+| `src/main.cpp` path in `src/CMakeLists.txt` | CMake error: `Cannot find source file: src/main.cpp` | Change to `main.cpp` — the file is relative to `src/CMakeLists.txt`, which already lives in `src/` |
+| `FetchContent_MakeAvailable(PokerHandEvaluator)` used instead of `FetchContent_Populate` | CMake error at configure time: no `CMakeLists.txt` found at repo root of PokerHandEvaluator | The repo's CMake root is in `cpp/`, not the root; use `FetchContent_Populate` (Task 1.5) or `SOURCE_SUBDIR cpp` (Task 3.6 upgrade) |
+| Forgetting `add_subdirectory(core)` in `src/CMakeLists.txt` | Build succeeds but `poker_core` target does not exist; later phases fail with "No rule to make target" | Add `add_subdirectory(core)` (and each new subdirectory as you create it) |
+| Running `cmake --build` before `cmake -S . -B build` | `build/` directory does not exist; build command errors immediately | Always configure first; or do a clean rebuild: `rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug` |
+| `yaml-cpp::yaml-cpp` as link target | CMake error: "Target 'yaml-cpp::yaml-cpp' not found" | The FetchContent target name is `yaml-cpp` (no namespace alias); see CLAUDE.md CMake Notes |
+
+### Self-score
+
+- **Solid**: configured and built first try, `texas-holdem` ran and exited 0, answered all checklist questions without re-reading the phase.
+- **Learning**: built after fixing 1-2 CMake errors (path typos, missing `add_subdirectory`, wrong target name), understand concepts after re-reading.
+- **Needs review**: build failed with multiple configure errors or FetchContent failures; revisit Task 1.1 (CMake concepts) and Task 1.5 (FetchContent_Populate vs MakeAvailable) before moving to Phase 2.

@@ -168,7 +168,37 @@ struct GameState {
 };
 ```
 
-**Visibility rule:** `AIPlayer` and `HumanPlayer` receive the full `GameState` but MUST only read `holeCards[ownId]`. It is the `PromptBuilder`'s responsibility to exclude opponent hole cards from the prompt. `GameEngine` owns the authoritative `GameState`. This is a trust-based contract enforced by convention, not by the type system. A filtered `PlayerView` struct (containing only the calling player's hole cards) is a straightforward future hardening step.
+**Visibility rule:** `GameEngine` never passes `GameState` to players directly. Before calling `IPlayer::getAction()`, the engine calls `makePlayerView(state, playerId)` to produce a `PlayerView` — a filtered snapshot containing the calling player's own hole cards but not the `holeCards` map. This enforces information hiding at the type level: opponent cards are structurally absent, not just hidden by convention.
+
+---
+
+### `core/PlayerView.hpp`
+
+A filtered snapshot of `GameState` passed to `IPlayer::getAction()` and `PromptBuilder::build()`. Contains all public game information (community cards, chip counts, bets, positions, street) but replaces the full `holeCards` map with a single `myHand` field for the calling player only.
+
+```cpp
+struct PlayerView {
+    std::vector<Card>        communityCards;
+    PlayerId                 dealerButton;
+    PlayerId                 smallBlindSeat;
+    PlayerId                 bigBlindSeat;
+    std::vector<PlayerId>    actionOrder;
+    std::map<PlayerId, int>  chipCounts;
+    std::map<PlayerId, int>  currentBets;
+    int                      pot;
+    int                      minRaise;
+    Street                   street;
+    PlayerId                 activePlayer;
+    std::set<PlayerId>       foldedPlayers;
+    PlayerId                 selfId;   // which player this view is for
+    Hand                     myHand;   // only this player's hole cards
+};
+
+// Precondition: state.holeCards.count(forPlayer) > 0
+inline PlayerView makePlayerView(const GameState& state, PlayerId forPlayer);
+```
+
+`makePlayerView` is an `inline` free function defined in `PlayerView.hpp` — it is header-only, no `.cpp` needed. `PromptBuilder` receives a `PlayerView` so it cannot accidentally include opponent hole cards in an AI prompt even through a coding error.
 
 ---
 
@@ -188,7 +218,7 @@ State machine. Drives the full game loop. Holds `vector<unique_ptr<IPlayer>>` an
 
 **Betting round algorithm:**
 1. Determine action order for the street (pre-flop: UTG first; post-flop: first active player left of dealer)
-2. Each active (non-folded) player is asked for an `Action` via `IPlayer::getAction(state)`
+2. For each active (non-folded) player, `makePlayerView(state, playerId)` produces a filtered snapshot; `IPlayer::getAction(view)` is called with that snapshot
 3. A `Raise` reopens action to all players who have not yet folded (they get another turn)
 4. Street ends when all active players have acted AND all `currentBets` are equal (or player is all-in)
 5. Advance to next street; reset `currentBets`, recalculate `actionOrder`
@@ -210,7 +240,7 @@ public:
     virtual PlayerId    getId()   const = 0;
     virtual std::string getName() const = 0;
     virtual void        dealHoleCards(const Hand& cards) = 0;  // engine delivers private cards
-    virtual Action      getAction(const GameState& state) = 0;
+    virtual Action      getAction(const PlayerView& view) = 0; // filtered: only own hole cards visible
 };
 ```
 
@@ -318,10 +348,11 @@ main.cpp
   └── constructs GameEngine(players, config)
   └── game loop:
         GameEngine::tick()
-          └── requests Action from active IPlayer::getAction(state)
+          └── makePlayerView(state, activePlayerId) → PlayerView (filtered: own cards only)
+          └── requests Action from active IPlayer::getAction(view)
                 HumanPlayer → blocks on std::future<Action>
                   ← InputHandler fulfills promise on button click
-                AIPlayer → PromptBuilder → OllamaClient (sync HTTP) → parse → Action
+                AIPlayer → PromptBuilder::build(view, personality) → OllamaClient (sync HTTP) → parse → Action
           └── validates and applies Action to GameState
           └── advances street or hand as needed
           └── GameRenderer::render(gameState)  ← called every frame from main loop

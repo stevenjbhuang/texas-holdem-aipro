@@ -135,3 +135,64 @@ Expected: all tests pass.
 ```bash
 git add -A && git commit -m "test(core): add GoogleTest tests for Card, Deck, HandEvaluator, GameEngine"
 ```
+
+---
+
+## Evaluation
+
+Run `/phase-verify` to compile and get automated feedback on your implementation.
+
+### Build checklist
+
+```bash
+# 1. Configure (if not already done)
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+# 2. Build — should produce zero errors and zero warnings
+cmake --build build -j$(nproc)
+
+# 3. Run all tests
+cd build && ctest --output-on-failure
+```
+
+Success looks like:
+- `cmake --build` exits with code `0` and the `core_tests` binary appears under `build/tests/core/`
+- `ctest` output ends with `100% tests passed, 0 tests failed`
+- Each test suite is listed individually, e.g.:
+  ```
+  Test #1: DeckTest.Has52Cards ....... Passed
+  Test #2: DeckTest.NoDuplicates ..... Passed
+  Test #3: CardTest.EqualCards ....... Passed
+  ```
+- No `FAILED` lines anywhere in the output
+
+If only some suites appear, check that `gtest_discover_tests(core_tests)` is present in `tests/core/CMakeLists.txt` and that `add_subdirectory(core)` is uncommented in `tests/CMakeLists.txt`.
+
+### Concept checklist
+
+Answer these honestly about your own code before moving on:
+
+- [ ] Did I use `EXPECT_*` for most assertions and reserve `ASSERT_*` only for cases where a failure would cause a crash (e.g., dereferencing a null pointer)?
+- [ ] Does my `test_deck.cpp` verify that dealing the 53rd card throws `std::out_of_range` using `EXPECT_THROW`?
+- [ ] Does my `test_deck.cpp` use a `std::set` or similar structure to confirm no duplicate cards after dealing all 52?
+- [ ] Does my `test_hand_evaluator.cpp` construct `Card` vectors manually (not rely on `Deck::deal()`) to create known hands?
+- [ ] Did I cover at least three distinct hand rankings in `test_hand_evaluator.cpp` (e.g., royal flush > straight flush > four of a kind)?
+- [ ] In `MockPlayer`, does `getAction()` return the stored `m_action` without touching any real game logic?
+- [ ] In `test_game_engine.cpp`, does my fold test assert that the folded player appears in `foldedPlayers` (not just that the game continued)?
+- [ ] Did I split tests into separate `.cpp` files per class, rather than putting all tests in one file?
+
+### Common mistakes
+
+| Mistake | Symptom | Fix |
+|---|---|---|
+| Forgetting `gtest_discover_tests(core_tests)` in CMakeLists | `cmake --build` succeeds but `ctest` reports "No tests were found" | Add `gtest_discover_tests(core_tests)` after `target_link_libraries` in `tests/core/CMakeLists.txt` |
+| Using `ASSERT_EQ` where `EXPECT_EQ` is appropriate | A single mismatch in a loop aborts the whole test, hiding later failures | Use `EXPECT_EQ` inside loops; only use `ASSERT_*` before a pointer dereference or similar crash risk |
+| `MockPlayer` stores `IPlayer*` instead of a concrete type | Linker error: undefined vtable or pure virtual call at runtime | `MockPlayer` must override all four pure virtual methods: `getId`, `getName`, `dealHoleCards`, `getAction` |
+| Constructing hands via `Deck::deal()` in evaluator tests | Test is fragile — it depends on shuffle order and may produce unpredictable hands | Build `std::vector<Card>` directly using specific `Rank` and `Suit` values |
+| `add_subdirectory(core)` left commented out in `tests/CMakeLists.txt` | `core_tests` target never defined; build error "No rule to make target" | Uncomment the line in `tests/CMakeLists.txt` |
+
+### Self-score
+
+- **Solid**: All tests green on first build attempt. You could explain what `EXPECT_` vs `ASSERT_` means and why `MockPlayer` needs a virtual destructor. All checklist boxes checked confidently.
+- **Learning**: Tests pass after 1-2 CMake or linker fixes. You had to look up `gtest_discover_tests` or the `EXPECT_THROW` syntax. A few checklist items required re-reading the concept boxes.
+- **Needs review**: Build failed with multiple errors (missing targets, linker failures, no tests discovered). Go back to Task 4.1, re-read the GoogleTest syntax section, and make sure your CMakeLists wiring matches the scaffold exactly before continuing to Phase 5.
