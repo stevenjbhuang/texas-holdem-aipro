@@ -15,7 +15,7 @@
 
 The key design decision is choosing the *right container type* for each field. Chip counts are player-keyed data → `std::map`. Folded players are a membership set → `std::set`. Action order is a sequence → `std::vector`. Getting these right now makes every consumer of `GameState` cleaner and less error-prone.
 
-- [ ] Create `src/core/GameState.hpp`. Use `docs/spec/design.md` → "core/GameState.hpp" as your field list.
+- [x] Create `src/core/GameState.hpp`. Use `docs/spec/design.md` → "core/GameState.hpp" as your field list.
 
 **Scaffold:**
 ```cpp
@@ -137,6 +137,9 @@ struct GameState {
     Street             street       = Street::PreFlop;
     PlayerId           activePlayer = 0;
     std::set<PlayerId> foldedPlayers;
+
+    // Side pot tracking: total chips put in this hand per player (all streets)
+    std::map<PlayerId, int> totalContributed;
 };
 
 } // namespace poker
@@ -160,7 +163,7 @@ struct GameState {
 
 This is the standard pattern for information hiding in game engines: the authoritative state (full) lives inside the engine; external actors receive only what they are allowed to see. It also makes `IPlayer::getAction()` easier to reason about — the parameter carries exactly the information a player needs to make a decision, nothing more.
 
-- [ ] Create `src/core/PlayerView.hpp` with the `PlayerView` struct and an `inline` `makePlayerView()` factory function.
+- [x] Create `src/core/PlayerView.hpp` with the `PlayerView` struct and an `inline` `makePlayerView()` factory function.
 
 <details>
 <summary>Concepts</summary>
@@ -281,7 +284,7 @@ This is a thinking task, not a coding task. Before writing a single line of `Gam
 
 Texas Hold'em moves through five states — `PreFlop → Flop → Turn → River → Showdown` — and each transition is triggered by the same event: a betting round ending. But "ending" has a precise definition that is easy to get wrong, especially with the re-open-on-raise rule. Writing it out in plain English as a comment forces you to have a correct mental model before the code runs.
 
-- [ ] Write answers to the three questions below as a comment block at the top of `GameEngine.hpp` before writing any code — this forces you to understand the transitions before implementing them.
+- [x] Write answers to the three questions below as a comment block at the top of `GameEngine.hpp` before writing any code — this forces you to understand the transitions before implementing them.
 
 ```cpp
 // STATE MACHINE TRANSITIONS
@@ -431,7 +434,7 @@ This task is about the *interface and structure*, not the implementation (that's
 
 You also need `src/players/IPlayer.hpp` before `GameEngine` will compile. It needs three methods: `getId()` (so the engine can map players to `PlayerId`s), `dealHoleCards()` (so the engine can deliver cards), and `getAction(const PlayerView&)` (so the engine can ask for an action, passing only what the player is allowed to see). The full interface — `getName()`, comments, etc. — comes in Phase 6.
 
-- [ ] Create `src/players/IPlayer.hpp`. Phase 6 adds `getId()`, `getName()`, and other methods — for now, include only what `GameEngine` actually calls. A bare forward declaration is NOT enough: `std::unique_ptr<IPlayer>` needs the complete type to invoke the destructor correctly.
+- [x] Create `src/players/IPlayer.hpp`. Phase 6 adds `getId()`, `getName()`, and other methods — for now, include only what `GameEngine` actually calls. A bare forward declaration is NOT enough: `std::unique_ptr<IPlayer>` needs the complete type to invoke the destructor correctly.
 
 ```cpp
 #pragma once
@@ -444,9 +447,8 @@ namespace poker {
 class IPlayer {
 public:
     virtual ~IPlayer() = default;
-    virtual PlayerId getId()                           const = 0;
-    virtual void     dealHoleCards(const Hand& cards)       = 0;
-    virtual Action   getAction(const PlayerView& view)      = 0;
+    // Your turn: add the three pure virtual methods GameEngine calls
+    // (getId, dealHoleCards, getAction)
 };
 
 } // namespace poker
@@ -454,61 +456,10 @@ public:
 
 We'll add `getName()` and other methods in Phase 6.
 
-- [ ] Create `src/core/GameEngine.hpp` using the scaffold below. Fill in the comment at the top from Task 3.2.
-
-```cpp
-#pragma once
-// STATE MACHINE TRANSITIONS
-// (paste your answers from Task 3.2 here)
-
-#include "GameState.hpp"
-#include "Deck.hpp"
-#include "../players/IPlayer.hpp"
-#include <vector>
-#include <memory>
-#include <mutex>
-
-namespace poker {
-
-struct GameConfig {
-    int numPlayers    = 2;
-    int startingStack = 1000;
-    int smallBlind    = 5;
-    int bigBlind      = 10;
-};
-
-class GameEngine {
-public:
-    GameEngine(std::vector<std::unique_ptr<IPlayer>> players, GameConfig config);
-
-    // Advance the game by one action (ask active player, apply it)
-    void tick();
-
-    // Thread-safe copy for the renderer (main thread reads, engine thread writes)
-    GameState getStateSnapshot();
-
-    bool isGameOver() const;
-
-private:
-    void startNewHand();
-    void runBettingRound();
-    void advanceStreet();
-    void determineWinner();
-
-    void rotateDealerButton();
-    void postBlinds();
-    std::vector<PlayerId> buildActionOrder() const;
-
-    GameState  m_state;
-    GameConfig m_config;
-    std::vector<std::unique_ptr<IPlayer>> m_players;
-    Deck       m_deck;
-
-    mutable std::mutex m_stateMutex;  // protects m_state for snapshot reads
-};
-
-} // namespace poker
-```
+- [x] Create `src/core/GameEngine.hpp`. Paste your state machine comment from Task 3.3 at the top. Declare a `GameConfig` struct (4 int fields) and a `GameEngine` class with:
+  - Public: constructor taking `vector<unique_ptr<IPlayer>>` + `GameConfig`; `tick()`, `getStateSnapshot()`, `isGameOver()`
+  - Private: `startNewHand()`, `runBettingRound()`, `advanceStreet()`, `determineWinner()`, `rotateDealerButton()`, `postBlinds()`, `buildActionOrder()`
+  - Data members: `m_state`, `m_config`, `m_players`, `m_deck`, and a `mutable` mutex for the snapshot
 
 <details>
 <summary>Concepts</summary>
@@ -598,7 +549,88 @@ private:
 <details>
 <summary>Answers</summary>
 
-**Reference implementation** is the scaffold above — use it exactly.
+**Reference implementation — `IPlayer.hpp`:**
+
+```cpp
+#pragma once
+#include "core/PlayerView.hpp"
+#include "core/Hand.hpp"
+#include "core/Types.hpp"
+
+namespace poker {
+
+class IPlayer {
+public:
+    virtual ~IPlayer() = default;
+    virtual PlayerId getId()                           const = 0;
+    virtual void     dealHoleCards(const Hand& cards)       = 0;
+    virtual Action   getAction(const PlayerView& view)      = 0;
+};
+
+} // namespace poker
+```
+
+**Reference implementation — `GameEngine.hpp`:**
+
+```cpp
+#pragma once
+// STATE MACHINE TRANSITIONS
+// PreFlop → Flop when:   pre-flop betting round ends
+// Flop → Turn when:      flop betting round ends
+// Turn → River when:     turn betting round ends
+// River → Showdown when: river betting round ends
+// A betting round is "complete" when: all active players have acted since
+//   the last raise AND all currentBets among non-folded, non-all-in players
+//   are equal (needsToAct set is empty)
+
+#include "GameState.hpp"
+#include "Deck.hpp"
+#include "../players/IPlayer.hpp"
+#include <vector>
+#include <memory>
+#include <mutex>
+
+namespace poker {
+
+struct GameConfig {
+    int numPlayers    = 2;
+    int startingStack = 1000;
+    int smallBlind    = 5;
+    int bigBlind      = 10;
+};
+
+class GameEngine {
+public:
+    GameEngine(std::vector<std::unique_ptr<IPlayer>> players, GameConfig config);
+
+    // Advance the game by one action (ask active player, apply it)
+    void tick();
+
+    // Thread-safe copy for the renderer (main thread reads, engine thread writes)
+    GameState getStateSnapshot();
+
+    bool isGameOver() const;
+
+private:
+    void startNewHand();
+    void runBettingRound();
+    void advanceStreet();
+    void determineWinner();
+
+    void rotateDealerButton();
+    void postBlinds();
+    std::vector<PlayerId> buildActionOrder() const;
+
+    GameState  m_state;
+    GameConfig m_config;
+    std::vector<std::unique_ptr<IPlayer>> m_players;
+    Deck       m_deck;
+
+    mutable std::mutex m_stateMutex;  // protects m_state for snapshot reads
+};
+
+} // namespace poker
+```
 
 ---
 
@@ -622,9 +654,9 @@ There's one preparatory step before implementing the evaluator: the library's C+
 
 The C++ upgrade happens in Task 3.6. For now, you'll implement using the C API to feel the friction of raw integers and manual encoding — which motivates the upgrade.
 
-- [ ] Add `std::string toShortString() const` to `Card.hpp` and implement it in `Card.cpp`. Expected output: rank letter (`2`–`9`, `T`, `J`, `Q`, `K`, `A`) + suit letter (`c`, `d`, `h`, `s`). Example: `Card{Rank::Ace, Suit::Spades}.toShortString()` → `"As"`.
+- [x] Add `std::string toShortString() const` to `Card.hpp` and implement it in `Card.cpp`. Expected output: rank letter (`2`–`9`, `T`, `J`, `Q`, `K`, `A`) + suit letter (`c`, `d`, `h`, `s`). Example: `Card{Rank::Ace, Suit::Spades}.toShortString()` → `"As"`.
 
-- [ ] Create `src/core/HandEvaluator.hpp`:
+- [x] Create `src/core/HandEvaluator.hpp`. Declare a `HandEvaluator` class with two `static` methods: `evaluate()` (takes exactly 7 `Card`s, returns `int` score — lower = stronger) and `beats()` (returns true if the first 7-card hand beats the second).
 
 ```cpp
 #pragma once
@@ -635,49 +667,13 @@ namespace poker {
 
 class HandEvaluator {
 public:
-    // Evaluate best 5-card hand from exactly 7 cards (2 hole + 5 community).
-    // Returns a score: lower value = stronger hand (library convention).
-    static int evaluate(const std::vector<Card>& sevenCards);
-
-    // Returns true if handA beats handB.
-    static bool beats(const std::vector<Card>& handA, const std::vector<Card>& handB);
+    // Your turn: declare static evaluate() and beats()
 };
 
 } // namespace poker
 ```
 
-- [ ] Implement `HandEvaluator.cpp` using the C API first (Task 3.5 upgrades this to C++):
-
-```cpp
-#include "HandEvaluator.hpp"
-#include <phevaluator/phevaluator.h>
-
-namespace poker {
-
-// Convert our Card to the C library's integer encoding.
-// The C API expects: rank 0=Two..12=Ace, suit 0=Club..3=Spade.
-// Our Rank enum starts at Two=2, so we subtract 2 to get 0-based.
-static int toLibCard(const Card& c) {
-    int rank = static_cast<int>(c.getRank()) - 2;  // Two=2 → 0, Ace=14 → 12
-    int suit = static_cast<int>(c.getSuit());       // Club=0, Spade=3
-    return rank * 4 + suit;
-}
-
-int HandEvaluator::evaluate(const std::vector<Card>& cards) {
-    return evaluate_7cards(
-        toLibCard(cards[0]), toLibCard(cards[1]),
-        toLibCard(cards[2]), toLibCard(cards[3]),
-        toLibCard(cards[4]), toLibCard(cards[5]),
-        toLibCard(cards[6])
-    );
-}
-
-bool HandEvaluator::beats(const std::vector<Card>& a, const std::vector<Card>& b) {
-    return evaluate(a) < evaluate(b);  // lower score = stronger hand
-}
-
-} // namespace poker
-```
+- [x] Implement `HandEvaluator.cpp` using the C API (Task 3.7 upgrades this to C++). The C API function is `evaluate_7cards(c0, c1, ..., c6)` where each card is an int: `rank * 4 + suit`. Your `Rank` enum starts at `Two=2` but the library expects `Two=0` — you'll need to subtract 2.
 
 - [ ] Add `HandEvaluator.cpp` to `src/core/CMakeLists.txt` and confirm `poker_hand_evaluator` is linked.
 
@@ -762,9 +758,60 @@ std::string Card::toShortString() const {
 }
 ```
 
-**Reference implementation — `HandEvaluator.hpp`:** see scaffold above.
+**Reference implementation — `HandEvaluator.hpp`:**
 
-**Reference implementation — `HandEvaluator.cpp`:** see scaffold above.
+```cpp
+#pragma once
+#include "Card.hpp"
+#include <vector>
+
+namespace poker {
+
+class HandEvaluator {
+public:
+    // Evaluate best 5-card hand from exactly 7 cards (2 hole + 5 community).
+    // Returns a score: lower value = stronger hand (library convention).
+    static int evaluate(const std::vector<Card>& sevenCards);
+
+    // Returns true if handA beats handB.
+    static bool beats(const std::vector<Card>& handA, const std::vector<Card>& handB);
+};
+
+} // namespace poker
+```
+
+**Reference implementation — `HandEvaluator.cpp` (C API):**
+
+```cpp
+#include "HandEvaluator.hpp"
+#include <phevaluator/phevaluator.h>
+
+namespace poker {
+
+// Convert our Card to the C library's integer encoding.
+// The C API expects: rank 0=Two..12=Ace, suit 0=Club..3=Spade.
+// Our Rank enum starts at Two=2, so we subtract 2 to get 0-based.
+static int toLibCard(const Card& c) {
+    int rank = static_cast<int>(c.getRank()) - 2;  // Two=2 → 0, Ace=14 → 12
+    int suit = static_cast<int>(c.getSuit());       // Club=0, Spade=3
+    return rank * 4 + suit;
+}
+
+int HandEvaluator::evaluate(const std::vector<Card>& cards) {
+    return evaluate_7cards(
+        toLibCard(cards[0]), toLibCard(cards[1]),
+        toLibCard(cards[2]), toLibCard(cards[3]),
+        toLibCard(cards[4]), toLibCard(cards[5]),
+        toLibCard(cards[6])
+    );
+}
+
+bool HandEvaluator::beats(const std::vector<Card>& a, const std::vector<Card>& b) {
+    return evaluate(a) < evaluate(b);  // lower score = stronger hand
+}
+
+} // namespace poker
+```
 
 ---
 
@@ -792,7 +839,7 @@ Take it method by method. **Read the betting round algorithm in `docs/spec/desig
 - [ ] Implement `startNewHand()` — reset/shuffle deck, deal 2 cards per active player, rotate dealer, post blinds, clear community cards, set street to `PreFlop`, build action order, call `runBettingRound()`.
 - [ ] Implement `runBettingRound()` — loop using a `needsToAct` set; on Raise, re-add all non-folded players except the raiser; stop when `needsToAct` is empty or only one active player remains.
 - [ ] Implement `advanceStreet()` — deal 3 community cards for Flop, 1 for Turn, 1 for River; reset `currentBets`; rebuild `actionOrder`; call `runBettingRound()`.
-- [ ] Implement `determineWinner()` — combine each remaining player's hole cards with community cards; use `HandEvaluator::beats()` to find the winner; award `pot` to winner; clear `pot`.
+- [ ] Implement `determineWinner()` — build side pots from `totalContributed` (one pot per all-in level, eligible players = non-folded contributors at that level); for each pot find the best eligible hand using `HandEvaluator::evaluate()`; award each pot to its winner; clear `pot`.
 - [ ] Implement `tick()` — call `startNewHand()` if no hand in progress; or advance state depending on current street.
 - [ ] Implement `getStateSnapshot()` — lock `m_stateMutex`, return copy of `m_state`.
 - [ ] Add `GameEngine.cpp` to `src/core/CMakeLists.txt`. (`PlayerView.hpp` is header-only — no `.cpp` to register.)
@@ -927,8 +974,9 @@ GameEngine::GameEngine(std::vector<std::unique_ptr<IPlayer>> players, GameConfig
 {
     // Initialize chip counts for all players
     for (auto& player : m_players) {
-        m_state.chipCounts[player->getId()] = m_config.startingStack;
-        m_state.currentBets[player->getId()] = 0;
+        m_state.chipCounts[player->getId()]      = m_config.startingStack;
+        m_state.currentBets[player->getId()]     = 0;
+        m_state.totalContributed[player->getId()] = 0;
     }
     m_state.dealerButton = 0;
     startNewHand();
@@ -943,17 +991,23 @@ void GameEngine::rotateDealerButton() {
             break;
         }
     }
-    int n2 = static_cast<int>(m_players.size());
-    m_state.smallBlindSeat = (m_state.dealerButton + 1) % n2;
-    m_state.bigBlindSeat   = (m_state.dealerButton + 2) % n2;
+    if (n == 2) {
+        // Heads-up: dealer posts small blind, other player posts big blind
+        m_state.smallBlindSeat = m_state.dealerButton;
+        m_state.bigBlindSeat   = (m_state.dealerButton + 1) % n;
+    } else {
+        m_state.smallBlindSeat = (m_state.dealerButton + 1) % n;
+        m_state.bigBlindSeat   = (m_state.dealerButton + 2) % n;
+    }
 }
 
 void GameEngine::postBlinds() {
     auto deduct = [&](PlayerId id, int amount) {
         int actual = std::min(amount, m_state.chipCounts[id]);
-        m_state.chipCounts[id]  -= actual;
-        m_state.currentBets[id] += actual;
-        m_state.pot             += actual;
+        m_state.chipCounts[id]       -= actual;
+        m_state.currentBets[id]      += actual;
+        m_state.pot                  += actual;
+        m_state.totalContributed[id] += actual;
     };
     deduct(m_state.smallBlindSeat, m_config.smallBlind);
     deduct(m_state.bigBlindSeat,   m_config.bigBlind);
@@ -980,8 +1034,10 @@ std::vector<PlayerId> GameEngine::buildActionOrder() const {
 void GameEngine::startNewHand() {
     m_state.foldedPlayers.clear();
     m_state.communityCards.clear();
-    m_state.pot = 0;
-    for (auto& [id, bet] : m_state.currentBets) bet = 0;
+    m_state.pot      = 0;
+    m_state.minRaise = m_config.bigBlind;
+    for (auto& [id, bet] : m_state.currentBets)       bet = 0;
+    for (auto& [id, c]   : m_state.totalContributed)  c   = 0;
 
     m_deck.reset();
     m_deck.shuffle();
@@ -1002,6 +1058,7 @@ void GameEngine::startNewHand() {
     m_state.street = Street::PreFlop;
     m_state.actionOrder = buildActionOrder();
     runBettingRound();
+    awardPotIfHandOver();
 }
 
 void GameEngine::runBettingRound() {
@@ -1010,9 +1067,9 @@ void GameEngine::runBettingRound() {
 
     // Preserve iteration order from actionOrder
     while (!needsToAct.empty()) {
-        // Fast exit: only one player left
+        // Early exit: only one player left in the hand (includes all-in players)
         int active = 0;
-        for (PlayerId id : m_state.actionOrder)
+        for (auto& [id, chips] : m_state.chipCounts)
             if (m_state.foldedPlayers.count(id) == 0) ++active;
         if (active <= 1) break;
 
@@ -1043,9 +1100,10 @@ void GameEngine::runBettingRound() {
         } else if (action.type == Action::Type::Call) {
             int callAmt = std::min(maxBet - m_state.currentBets[actingId],
                                    m_state.chipCounts[actingId]);
-            m_state.chipCounts[actingId]  -= callAmt;
-            m_state.currentBets[actingId] += callAmt;
-            m_state.pot += callAmt;
+            m_state.chipCounts[actingId]       -= callAmt;
+            m_state.currentBets[actingId]      += callAmt;
+            m_state.pot                        += callAmt;
+            m_state.totalContributed[actingId] += callAmt;
             needsToAct.erase(actingId);
 
         } else { // Raise
@@ -1054,14 +1112,16 @@ void GameEngine::runBettingRound() {
                                         m_state.chipCounts[actingId] + m_state.currentBets[actingId]);
             int additional = raiseTotal - m_state.currentBets[actingId];
             m_state.minRaise = raiseTotal - maxBet;
-            m_state.chipCounts[actingId]  -= additional;
-            m_state.currentBets[actingId]  = raiseTotal;
-            m_state.pot += additional;
+            m_state.chipCounts[actingId]       -= additional;
+            m_state.currentBets[actingId]       = raiseTotal;
+            m_state.pot                        += additional;
+            m_state.totalContributed[actingId] += additional;
 
-            // Reopen action to all non-folded players except the raiser
+            // Reopen action to all non-folded, non-all-in players except the raiser
             needsToAct.clear();
             for (PlayerId id : m_state.actionOrder) {
-                if (id != actingId && m_state.foldedPlayers.count(id) == 0)
+                if (id != actingId && m_state.foldedPlayers.count(id) == 0
+                        && m_state.chipCounts[id] > 0)
                     needsToAct.insert(id);
             }
         }
@@ -1069,12 +1129,14 @@ void GameEngine::runBettingRound() {
 }
 
 void GameEngine::advanceStreet() {
-    // Reset bets for new street
+    // Reset bets for the new street
     for (auto& [id, bet] : m_state.currentBets) bet = 0;
     m_state.minRaise = m_config.bigBlind;
 
+    // Deal community cards and advance the street enum.
+    // River → Showdown: no cards dealt; call determineWinner() and return early
+    // so we never call runBettingRound() at Showdown.
     if (m_state.street == Street::PreFlop) {
-        // Deal flop (3 cards)
         for (int i = 0; i < 3; ++i) m_state.communityCards.push_back(m_deck.deal());
         m_state.street = Street::Flop;
     } else if (m_state.street == Street::Flop) {
@@ -1086,39 +1148,83 @@ void GameEngine::advanceStreet() {
     } else if (m_state.street == Street::River) {
         m_state.street = Street::Showdown;
         determineWinner();
-        return;
+        return;  // no betting at showdown
     }
 
     m_state.actionOrder = buildActionOrder();
     runBettingRound();
+    awardPotIfHandOver();
+}
+
+bool GameEngine::awardPotIfHandOver() {
+    int active = 0;
+    for (auto& [id, chips] : m_state.chipCounts)
+        if (m_state.foldedPlayers.count(id) == 0) ++active;  // count all-in players too
+    if (active <= 1) {
+        determineWinner();
+        m_state.street = Street::Showdown;
+        return true;
+    }
+    return false;
 }
 
 void GameEngine::determineWinner() {
-    PlayerId winner = -1;
-    int bestScore = std::numeric_limits<int>::max();
+    // Build side pots from per-player contributions.
+    // One pot is created per distinct contribution level (i.e. each all-in amount).
+    // Eligible players for each pot = non-folded players who put in at least that level.
+    struct SidePot { int amount; std::set<PlayerId> eligible; };
+    std::vector<SidePot> pots;
 
-    for (auto& player : m_players) {
-        PlayerId id = player->getId();
-        if (m_state.foldedPlayers.count(id) > 0) continue;
-        if (m_state.holeCards.count(id) == 0) continue;
+    std::vector<int> levels;
+    for (auto& [id, c] : m_state.totalContributed)
+        if (c > 0) levels.push_back(c);
+    std::sort(levels.begin(), levels.end());
+    levels.erase(std::unique(levels.begin(), levels.end()), levels.end());
 
-        std::vector<Card> seven;
-        seven.push_back(m_state.holeCards[id].first);
-        seven.push_back(m_state.holeCards[id].second);
-        for (const Card& c : m_state.communityCards) seven.push_back(c);
-
-        if (seven.size() == 7) {
-            int score = HandEvaluator::evaluate(seven);
-            if (score < bestScore) { bestScore = score; winner = id; }
-        }
+    int prevLevel = 0;
+    for (int level : levels) {
+        SidePot pot;
+        for (auto& [id, c] : m_state.totalContributed)
+            pot.amount += std::min(c, level) - std::min(c, prevLevel);
+        for (auto& [id, c] : m_state.totalContributed)
+            if (c >= level && m_state.foldedPlayers.count(id) == 0)
+                pot.eligible.insert(id);
+        if (!pot.eligible.empty())
+            pots.push_back(pot);
+        prevLevel = level;
     }
 
-    if (winner != -1)
-        m_state.chipCounts[winner] += m_state.pot;
+    // Award each pot to the best eligible hand
+    for (auto& pot : pots) {
+        // Uncontested: sole remaining player wins without needing community cards
+        if (pot.eligible.size() == 1) {
+            m_state.chipCounts[*pot.eligible.begin()] += pot.amount;
+            continue;
+        }
+
+        // Contested: evaluate hands (requires all 5 community cards)
+        PlayerId winner = -1;
+        int bestScore = std::numeric_limits<int>::max();
+        for (PlayerId id : pot.eligible) {
+            if (m_state.holeCards.count(id) == 0) continue;
+            std::vector<Card> seven;
+            seven.push_back(m_state.holeCards[id].first);
+            seven.push_back(m_state.holeCards[id].second);
+            for (const Card& c : m_state.communityCards) seven.push_back(c);
+            if (seven.size() == 7) {
+                int score = HandEvaluator::evaluate(seven);
+                if (score < bestScore) { bestScore = score; winner = id; }
+            }
+        }
+        if (winner != -1)
+            m_state.chipCounts[winner] += pot.amount;
+    }
     m_state.pot = 0;
 }
 
 void GameEngine::tick() {
+    // Worker thread calls tick() in a loop. Each call advances one street.
+    // Showdown is a terminal state — start the next hand.
     if (m_state.street == Street::Showdown)
         startNewHand();
     else
@@ -1160,55 +1266,11 @@ This task also introduces two important CMake patterns: `SOURCE_SUBDIR` (for lib
 
 Now that you've felt the friction of the C API (raw integers, manual rank offset, no type safety), upgrade to the library's own C++ wrapper. Same library — just switching from the C bindings to the C++ ones.
 
-- [ ] Update `cmake/Dependencies.cmake` — replace the manual `add_library` block with:
-
-```cmake
-# Disable the library's own tests/examples to avoid a googletest version conflict
-set(BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_PLO5     OFF CACHE BOOL "" FORCE)
-set(BUILD_PLO6     OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(
-    PokerHandEvaluator
-    GIT_REPOSITORY https://github.com/HenryRLee/PokerHandEvaluator.git
-    GIT_TAG        v0.5.3.1
-    SOURCE_SUBDIR  cpp
-)
-FetchContent_MakeAvailable(PokerHandEvaluator)
-# Provides CMake target: pheval
-```
+- [ ] Update `cmake/Dependencies.cmake` — replace the manual `add_library` block with a `FetchContent_Declare(PokerHandEvaluator ...)` call. Use `GIT_TAG v0.5.3.1`, add `SOURCE_SUBDIR cpp` (the library's CMakeLists is not at the repo root), and set `BUILD_TESTS`, `BUILD_EXAMPLES`, `BUILD_PLO5`, and `BUILD_PLO6` to `OFF` before calling `FetchContent_MakeAvailable` to avoid a GoogleTest version conflict.
 
 - [ ] Update `src/core/CMakeLists.txt` — change `poker_hand_evaluator` → `pheval`.
 
-- [ ] Rewrite `HandEvaluator.cpp` to use the C++ interface:
-
-```cpp
-#include "HandEvaluator.hpp"
-#include <phevaluator/phevaluator.h>
-
-namespace poker {
-
-static phevaluator::Card toLibCard(const Card& c) {
-    // phevaluator::Card accepts a two-char string: "Ac", "2d", etc.
-    return phevaluator::Card(c.toShortString());
-}
-
-int HandEvaluator::evaluate(const std::vector<Card>& cards) {
-    phevaluator::Rank rank = phevaluator::EvaluateCards(
-        toLibCard(cards[0]), toLibCard(cards[1]),
-        toLibCard(cards[2]), toLibCard(cards[3]),
-        toLibCard(cards[4]), toLibCard(cards[5]),
-        toLibCard(cards[6])
-    );
-    return rank.value();  // int 1–7462; lower = stronger
-}
-
-bool HandEvaluator::beats(const std::vector<Card>& a, const std::vector<Card>& b) {
-    return evaluate(a) < evaluate(b);
-}
-
-} // namespace poker
-```
+- [ ] Rewrite `HandEvaluator.cpp` to use the C++ interface: replace `toLibCard()` integer arithmetic with `phevaluator::Card(c.toShortString())`, and replace `evaluate_7cards()` with `phevaluator::EvaluateCards()`. Return `rank.value()` as the score.
 
 - [ ] Clean build to verify the upgrade:
 ```bash
@@ -1271,7 +1333,55 @@ git commit -m "refactor(core): upgrade PokerHandEvaluator to C++ interface (phev
 <details>
 <summary>Answers</summary>
 
-**Reference implementation:** see the three changes above (Dependencies.cmake, CMakeLists.txt, HandEvaluator.cpp).
+**Reference implementation — `cmake/Dependencies.cmake`:**
+
+```cmake
+# Disable the library's own tests/examples to avoid a googletest version conflict
+set(BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_PLO5     OFF CACHE BOOL "" FORCE)
+set(BUILD_PLO6     OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    PokerHandEvaluator
+    GIT_REPOSITORY https://github.com/HenryRLee/PokerHandEvaluator.git
+    GIT_TAG        v0.5.3.1
+    SOURCE_SUBDIR  cpp
+)
+FetchContent_MakeAvailable(PokerHandEvaluator)
+# Provides CMake target: pheval
+```
+
+**Reference implementation — `src/core/CMakeLists.txt`:** change `poker_hand_evaluator` → `pheval` in the `target_link_libraries` call.
+
+**Reference implementation — `HandEvaluator.cpp` (C++ API):**
+
+```cpp
+#include "HandEvaluator.hpp"
+#include <phevaluator/phevaluator.h>
+
+namespace poker {
+
+static phevaluator::Card toLibCard(const Card& c) {
+    // phevaluator::Card accepts a two-char string: "Ac", "2d", etc.
+    return phevaluator::Card(c.toShortString());
+}
+
+int HandEvaluator::evaluate(const std::vector<Card>& cards) {
+    phevaluator::Rank rank = phevaluator::EvaluateCards(
+        toLibCard(cards[0]), toLibCard(cards[1]),
+        toLibCard(cards[2]), toLibCard(cards[3]),
+        toLibCard(cards[4]), toLibCard(cards[5]),
+        toLibCard(cards[6])
+    );
+    return rank.value();  // int 1–7462; lower = stronger
+}
+
+bool HandEvaluator::beats(const std::vector<Card>& a, const std::vector<Card>& b) {
+    return evaluate(a) < evaluate(b);
+}
+
+} // namespace poker
+```
 
 ---
 
