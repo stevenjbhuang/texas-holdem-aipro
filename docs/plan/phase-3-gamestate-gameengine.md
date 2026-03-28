@@ -138,8 +138,11 @@ struct GameState {
     PlayerId           activePlayer = 0;
     std::set<PlayerId> foldedPlayers;
 
-    // Side pot tracking: total chips put in this hand per player (all streets)
+    // Side pot tracking: total chips committed per player across all streets this hand
     std::map<PlayerId, int> totalContributed;
+
+    // Renderer signal: true while engine is blocked on IPlayer::getAction()
+    bool waitingForAction = false;
 };
 
 } // namespace poker
@@ -539,6 +542,28 @@ We'll add `getName()` and other methods in Phase 6.
 >
 > The copy is not free — `GameState` contains several maps and vectors. But compared to the alternative (undefined behaviour from a data race), the cost is trivial.
 
+> **Concept: The mutex must protect writes too**
+>
+> A common mistake: locking only in `getStateSnapshot()` while leaving `tick()` unprotected. The mutex only prevents a data race if **both** threads hold it before accessing the shared data. Locking only the reader is like putting a lock on one side of a door.
+>
+> The fix is to lock `m_stateMutex` at the start of `tick()`:
+>
+> ```cpp
+> void GameEngine::tick() {
+>     std::lock_guard<std::mutex> lock(m_stateMutex);
+>     if (!m_handStarted || m_state.street == Street::Showdown) {
+>         m_handStarted = true;
+>         startNewHand();
+>     } else {
+>         advanceStreet();
+>     }
+> }
+> ```
+>
+> This means `getStateSnapshot()` will block while a tick is in progress, and `tick()` will block while a snapshot is being taken. For a game with ≤9 players running at human timescales, this is fine.
+>
+> The production alternative is a **double-buffer**: the engine writes to a private copy of `GameState` and atomically swaps a pointer when the tick completes. The renderer always reads the last completed snapshot without ever blocking the engine thread. This is worth knowing exists — but for this project the single-mutex approach is correct and sufficient.
+
 **Questions — think through these before checking answers:**
 1. Why does `GameEngine`'s constructor take `std::vector<std::unique_ptr<IPlayer>>` by value (not by reference or const reference)? Think about what happens to the vector after the constructor returns.
 2. Why is `m_stateMutex` declared `mutable`? What would happen if you removed `mutable` and kept `getStateSnapshot()` as `const`?
@@ -833,7 +858,7 @@ The key to implementing this without getting lost is to go method by method from
 
 Take it method by method. **Read the betting round algorithm in `docs/spec/design.md` → "core/GameEngine.hpp" before writing `runBettingRound()`.**
 
-- [ ] Implement `rotateDealerButton()` — advance `dealerButton` to the next player with chips; set `smallBlindSeat` and `bigBlindSeat` accordingly.
+- [ ] Implement `rotateDealerButton()` — advance `m_dealerSeat` (a `SeatIndex`) to the next seat with chips; derive `dealerButton`, `smallBlindSeat`, and `bigBlindSeat` in `GameState` by looking up `m_seats[seatIndex]`. Never do `% n` arithmetic on `PlayerId` values.
 - [ ] Implement `postBlinds()` — subtract small and big blind from their respective `chipCounts`, set `currentBets`, add to `pot`, set `minRaise = m_config.bigBlind`.
 - [ ] Implement `buildActionOrder()` — return a `vector<PlayerId>` of non-folded, non-broke players in clockwise order starting from UTG (pre-flop) or left of dealer (post-flop).
 - [ ] Implement `startNewHand()` — reset/shuffle deck, deal 2 cards per active player, rotate dealer, post blinds, clear community cards, set street to `PreFlop`, build action order, call `runBettingRound()`.
@@ -860,6 +885,27 @@ git commit -m "feat(core): add GameState, PlayerView, HandEvaluator, GameEngine 
 
 <details>
 <summary>Concepts</summary>
+
+> **Concept: Don't run game logic in the constructor**
+>
+> The constructor initialises data structures only — it must not run a betting round. This follows the standard production pattern: **construction sets up state, progression is driven externally** by the caller calling `tick()`.
+>
+> If the constructor ran `startNewHand()`, the engine would be unobservable during setup: tests and the renderer couldn't inspect the clean initial state before any hand begins, and there would be no way to know whether a snapshotted chip count reflects "just initialised" or "after a full hand".
+>
+> The lifecycle flag `m_handStarted` (private, defaults to `false`) keeps this concern out of `GameState`. `tick()` checks it to decide whether to start the first hand:
+>
+> ```cpp
+> void GameEngine::tick() {
+>     if (!m_handStarted || m_state.street == Street::Showdown) {
+>         m_handStarted = true;
+>         startNewHand();
+>     } else {
+>         advanceStreet();
+>     }
+> }
+> ```
+>
+> This avoids using a domain enum value (`Street::Showdown`) as a sentinel for an engine lifecycle concept — `Street` values should only mean something when a hand is actually in progress.
 
 > **Concept: `startNewHand()` — the reset sequence matters**
 >
@@ -932,9 +978,24 @@ git commit -m "feat(core): add GameState, PlayerView, HandEvaluator, GameEngine 
 >
 > Do this for each non-folded player, track the one with the lowest score, award them `m_state.pot`.
 
-> **Concept: Finding a player by ID**
+> **Concept: `PlayerId` vs `SeatIndex` — separating identity from position**
 >
-> `m_players` is a `vector<unique_ptr<IPlayer>>`. To get the `IPlayer*` for a given `PlayerId`, you need a linear search or a parallel map. The simplest approach:
+> In production game engines, player identity and seat position are deliberately kept separate:
+>
+> - **`PlayerId`** is an opaque identifier — it comes from an auth system, a database, or a session. It is never used in arithmetic. It is a map key only.
+> - **`SeatIndex`** (0..n-1) is a physical position at the table, used only for rotation arithmetic (`% n`). It is ephemeral — it is assigned when a player sits down and means nothing outside the engine.
+>
+> `GameEngine` maintains the mapping in the constructor and uses seat indices for all rotation logic:
+>
+> ```cpp
+> std::vector<PlayerId>         m_seats;   // seat index → PlayerId
+> std::map<PlayerId, SeatIndex> m_seatOf;  // PlayerId → seat index
+> SeatIndex                     m_dealerSeat;
+> ```
+>
+> All arithmetic stays internal. `GameState` (the public snapshot) only ever exposes `PlayerId` — consumers never need to know seat positions.
+>
+> `findPlayer` uses a linear search over `m_players`:
 >
 > ```cpp
 > IPlayer* GameEngine::findPlayer(PlayerId id) const {
@@ -944,7 +1005,7 @@ git commit -m "feat(core): add GameState, PlayerView, HandEvaluator, GameEngine 
 > }
 > ```
 >
-> With ≤9 players this is O(n) but fast in practice. You could build a `std::map<PlayerId, IPlayer*>` in the constructor if you wanted O(1) lookup — worthwhile only if profiling reveals it's a bottleneck.
+> With ≤9 players this is O(n) but negligible. The `m_seatOf` map already gives O(1) seat lookup; a `std::map<PlayerId, IPlayer*>` could be added for O(1) player lookup too if profiling warranted it.
 
 **Questions — think through these before checking answers:**
 1. Why does `postBlinds()` need to set `m_state.currentBets` for the blind players before `runBettingRound()` starts, rather than having them "act" in the first round like other players?
@@ -972,32 +1033,44 @@ GameEngine::GameEngine(std::vector<std::unique_ptr<IPlayer>> players, GameConfig
     : m_players(std::move(players))
     , m_config(config)
 {
-    // Initialize chip counts for all players
-    for (auto& player : m_players) {
-        m_state.chipCounts[player->getId()]      = m_config.startingStack;
-        m_state.currentBets[player->getId()]     = 0;
-        m_state.totalContributed[player->getId()] = 0;
+    int n = static_cast<int>(m_players.size());
+    m_seats.resize(n);
+
+    // Build seat ↔ player mappings. Players sit in the order they were passed in.
+    for (SeatIndex seat = 0; seat < n; ++seat) {
+        PlayerId pid = m_players[seat]->getId();
+        m_seats[seat] = pid;
+        m_seatOf[pid] = seat;
+        m_state.chipCounts[pid]       = m_config.startingStack;
+        m_state.currentBets[pid]      = 0;
+        m_state.totalContributed[pid] = 0;
     }
-    m_state.dealerButton = 0;
-    startNewHand();
+
+    m_dealerSeat     = n - 1;  // first rotateDealerButton() lands on seat 0
+    m_state.minRaise = m_config.bigBlind;
+    // m_handStarted = false (default) — tick() starts hand 1 on first call
 }
 
 void GameEngine::rotateDealerButton() {
-    int n = static_cast<int>(m_players.size());
+    int n = static_cast<int>(m_seats.size());
     for (int i = 1; i <= n; ++i) {
-        PlayerId candidate = (m_state.dealerButton + i) % n;
-        if (m_state.chipCounts[candidate] > 0) {
-            m_state.dealerButton = candidate;
+        SeatIndex candidate = (m_dealerSeat + i) % n;
+        if (m_state.chipCounts.at(m_seats[candidate]) > 0) {
+            m_dealerSeat = candidate;
             break;
         }
     }
+
+    // Translate seat index → PlayerId for public GameState
+    m_state.dealerButton = m_seats[m_dealerSeat];
+
     if (n == 2) {
-        // Heads-up: dealer posts small blind, other player posts big blind
-        m_state.smallBlindSeat = m_state.dealerButton;
-        m_state.bigBlindSeat   = (m_state.dealerButton + 1) % n;
+        // Heads-up: dealer posts small blind
+        m_state.smallBlindSeat = m_seats[m_dealerSeat];
+        m_state.bigBlindSeat   = m_seats[(m_dealerSeat + 1) % n];
     } else {
-        m_state.smallBlindSeat = (m_state.dealerButton + 1) % n;
-        m_state.bigBlindSeat   = (m_state.dealerButton + 2) % n;
+        m_state.smallBlindSeat = m_seats[(m_dealerSeat + 1) % n];
+        m_state.bigBlindSeat   = m_seats[(m_dealerSeat + 2) % n];
     }
 }
 
@@ -1015,18 +1088,18 @@ void GameEngine::postBlinds() {
 }
 
 std::vector<PlayerId> GameEngine::buildActionOrder() const {
-    int n = static_cast<int>(m_players.size());
-    int start;
+    int n = static_cast<int>(m_seats.size());
+    SeatIndex startSeat;
     if (m_state.street == Street::PreFlop)
-        start = (m_state.bigBlindSeat + 1) % n;   // UTG
+        startSeat = (m_seatOf.at(m_state.bigBlindSeat) + 1) % n;  // UTG = left of BB
     else
-        start = (m_state.dealerButton + 1) % n;   // left of dealer
+        startSeat = (m_dealerSeat + 1) % n;                        // left of dealer
 
     std::vector<PlayerId> order;
     for (int i = 0; i < n; ++i) {
-        PlayerId id = (start + i) % n;
-        if (m_state.foldedPlayers.count(id) == 0 && m_state.chipCounts[id] > 0)
-            order.push_back(id);
+        PlayerId pid = m_seats[(startSeat + i) % n];
+        if (m_state.foldedPlayers.count(pid) == 0 && m_state.chipCounts.at(pid) > 0)
+            order.push_back(pid);
     }
     return order;
 }
@@ -1080,14 +1153,24 @@ void GameEngine::runBettingRound() {
         }
         if (actingId == -1) break;
 
-        m_state.activePlayer = actingId;
-        IPlayer* player = nullptr;
-        for (auto& p : m_players)
-            if (p->getId() == actingId) { player = p.get(); break; }
+        // Publish "waiting" state under lock before releasing — renderer shows animation
+        PlayerView view;
+        IPlayer*   player = nullptr;
+        {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            m_state.activePlayer     = actingId;
+            m_state.waitingForAction = true;
+            view   = makePlayerView(m_state, actingId);
+            for (auto& p : m_players)
+                if (p->getId() == actingId) { player = p.get(); break; }
+        }
 
-        // Build a filtered view: player sees only their own hole cards
-        PlayerView view = makePlayerView(m_state, actingId);
+        // Lock released — getAction() may block for seconds (human input or AI HTTP)
         Action action = player->getAction(view);
+
+        // Re-acquire to apply result and clear waiting flag
+        std::lock_guard<std::mutex> lock(m_stateMutex);
+        m_state.waitingForAction = false;
 
         // Find current max bet
         int maxBet = 0;
@@ -1223,12 +1306,14 @@ void GameEngine::determineWinner() {
 }
 
 void GameEngine::tick() {
-    // Worker thread calls tick() in a loop. Each call advances one street.
-    // Showdown is a terminal state — start the next hand.
-    if (m_state.street == Street::Showdown)
+    // No top-level lock — runBettingRound() acquires it granularly around each action
+    // so the renderer can read a fresh snapshot between every individual player action.
+    if (!m_handStarted || m_state.street == Street::Showdown) {
+        m_handStarted = true;
         startNewHand();
-    else
+    } else {
         advanceStreet();
+    }
 }
 
 GameState GameEngine::getStateSnapshot() {

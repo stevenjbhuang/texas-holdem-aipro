@@ -51,3 +51,7 @@ rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 
 - [Design Spec](../spec/design.md) — architecture, components, data flow
 - [Guides](../guides/) — per-topic learning guides added as we build each phase
+  - [Pointers & smart pointers](../guides/pointers.md)
+  - [Interfaces & virtual dispatch](../guides/interfaces.md)
+  - [CMake intro](../guides/cmake-intro.md)
+  - [Mutexes & variable lifetimes](../guides/mutex-and-lifetimes.md)

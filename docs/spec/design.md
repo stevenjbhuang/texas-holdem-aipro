@@ -65,7 +65,7 @@ texas-holdem-aipro/
 │   │   ├── GameState.hpp/cpp       # Full game state (see Component Designs)
 │   │   └── GameEngine.hpp/cpp      # State machine: pre-flop→flop→turn→river→showdown
 │   ├── players/
-│   │   ├── IPlayer.hpp             # Pure interface: getId, getName, dealHoleCards, getAction
+│   │   ├── IPlayer.hpp             # Pure interface: getId, dealHoleCards, getAction (getName added Phase 6)
 │   │   ├── HumanPlayer.hpp/cpp     # Blocks on std::future<Action> fulfilled by InputHandler
 │   │   └── AIPlayer.hpp/cpp        # Builds prompt, calls ILLMClient, parses response
 │   ├── ai/
@@ -99,7 +99,9 @@ texas-holdem-aipro/
 All fundamental types live here to avoid circular includes:
 
 ```cpp
-using PlayerId = int;   // 0-based seat index
+using PlayerId = int;   // opaque player identifier — never used in arithmetic, only as a map key
+// SeatIndex (0..n-1) is an internal GameEngine concern used for rotation arithmetic;
+// it never appears in GameState or any public interface
 
 enum class Street { PreFlop, Flop, Turn, River, Showdown };
 
@@ -162,9 +164,18 @@ struct GameState {
     int                        minRaise;         // minimum legal raise amount this street
 
     // State
-    Street                     street;
-    PlayerId                   activePlayer;
+    Street                     street       = Street::PreFlop;
+    PlayerId                   activePlayer = 0;
     std::set<PlayerId>         foldedPlayers;
+
+    // Side pot tracking: total chips committed per player across all streets this hand.
+    // Used by determineWinner() to calculate per-player pot eligibility.
+    std::map<PlayerId, int>    totalContributed;
+
+    // Renderer signal: true while the engine is blocked waiting for activePlayer's action.
+    // The renderer uses this to show a "thinking..." or "your turn" overlay.
+    // Set true (under lock) before calling getAction(); set false (under lock) after applying it.
+    bool                       waitingForAction = false;
 };
 ```
 
@@ -190,7 +201,7 @@ struct PlayerView {
     Street                   street;
     PlayerId                 activePlayer;
     std::set<PlayerId>       foldedPlayers;
-    PlayerId                 selfId;   // which player this view is for
+    PlayerId                 myId;     // which player this view is for
     Hand                     myHand;   // only this player's hole cards
 };
 
@@ -216,14 +227,33 @@ Thin wrapper around the [HenryRLee/PokerHandEvaluator](https://github.com/HenryR
 
 State machine. Drives the full game loop. Holds `vector<unique_ptr<IPlayer>>` and the authoritative `GameState`.
 
+**Internal design — identity vs position:**
+`GameEngine` uses a private `SeatIndex` type (0..n-1) for all seat rotation arithmetic. This is kept entirely internal — it never appears in `GameState` or any public interface. `PlayerId` is opaque; arithmetic on it is meaningless.
+
+```cpp
+// Private to GameEngine — never exposed publicly
+using SeatIndex = int;
+std::vector<PlayerId>         m_seats;      // seat index → PlayerId
+std::map<PlayerId, SeatIndex> m_seatOf;     // PlayerId → seat index
+SeatIndex                     m_dealerSeat; // rotation state; initialised to n-1 so first rotation lands on seat 0
+```
+
+**Construction and startup:**
+The constructor only initialises data structures — it does not start a hand. `m_handStarted` (private `bool`, defaults to `false`) tracks whether the first hand has begun. The first call to `tick()` triggers `startNewHand()` via the existing Showdown branch — no special-casing required. This keeps the object observable: callers can inspect initial chip counts before any game logic runs.
+
 **Betting round algorithm:**
 1. Determine action order for the street (pre-flop: UTG first; post-flop: first active player left of dealer)
-2. For each active (non-folded) player, `makePlayerView(state, playerId)` produces a filtered snapshot; `IPlayer::getAction(view)` is called with that snapshot
+2. For each active (non-folded) player:
+   - **Lock** → set `activePlayer`, set `waitingForAction = true` → **unlock** (renderer sees "waiting" state)
+   - Call `IPlayer::getAction(view)` — **no lock held** during this call (may block for seconds on human input or AI HTTP)
+   - **Lock** → set `waitingForAction = false`, apply action to `GameState` → **unlock** (renderer sees updated state)
 3. A `Raise` reopens action to all players who have not yet folded (they get another turn)
 4. Street ends when all active players have acted AND all `currentBets` are equal (or player is all-in)
 5. Advance to next street; reset `currentBets`, recalculate `actionOrder`
 
-**All-in / side pots:** v1 scopes out side pot calculation. If a player goes all-in for less than the current bet, the engine awards them only the portion of the pot they are eligible for. Full side-pot algorithm is a future extension.
+**Why the lock is released around `getAction()`:** If the engine held the mutex for the entire betting round, `getStateSnapshot()` would block until the full round completed — the renderer could never see individual actions. Releasing the lock before each `getAction()` call lets the renderer read a fresh snapshot after every state change, enabling smooth per-action animation. `waitingForAction` in `GameState` tells the renderer whether to show a static "player acted" frame or a live waiting animation.
+
+**All-in / side pots:** Full side pot calculation is implemented using per-player `totalContributed` tracking. `determineWinner()` builds one `SidePot` per distinct contribution level, determines eligible players (those who contributed at least that level and did not fold), and awards each pot independently to the best eligible hand. This handles all-in players correctly.
 
 **Showdown:** `GameEngine` uses `HandEvaluator` to compare remaining players' best 5-card hands (from their hole cards + community cards) and distributes the pot to the winner(s).
 
@@ -237,10 +267,10 @@ Pure abstract interface. All player types implement this:
 class IPlayer {
 public:
     virtual ~IPlayer() = default;
-    virtual PlayerId    getId()   const = 0;
-    virtual std::string getName() const = 0;
-    virtual void        dealHoleCards(const Hand& cards) = 0;  // engine delivers private cards
-    virtual Action      getAction(const PlayerView& view) = 0; // filtered: only own hole cards visible
+    virtual PlayerId    getId()                              const = 0;
+    virtual void        dealHoleCards(const Hand& cards)          = 0;  // engine delivers private cards
+    virtual Action      getAction(const PlayerView& view)         = 0;  // filtered: only own hole cards visible
+    // virtual std::string getName() const = 0;  // added Phase 6 for UI display
 };
 ```
 
@@ -320,15 +350,19 @@ On submit, returns a `GameConfig` struct to `main.cpp`.
 
 ### `ui/GameRenderer.hpp`
 
-Reads `const GameState&` each frame. Renders:
+Calls `GameEngine::getStateSnapshot()` on every frame to get a fresh copy of `GameState`. The snapshot must not be cached across frames — the engine publishes a new state after each individual player action. Renders:
 - Table felt and layout
 - Community cards (face up)
 - Each player's position, name, chip count
 - Current bets and pot
 - Human player's hole cards (face up); AI hole cards (face down)
-- Active player indicator
-- "Thinking..." overlay when `AIPlayer::getAction` is running
+- Active player indicator (always `state.activePlayer`)
+- **Waiting animation:** when `state.waitingForAction == true`:
+  - Human player (`activePlayer == humanId`): show Fold/Call/Raise action buttons
+  - AI player: show "Thinking..." overlay on that player's seat
 - Win/fold overlays at showdown
+
+Because `GameEngine` releases its mutex before calling `getAction()` and re-acquires it after applying the result, the renderer sees two distinct published states per action: one with `waitingForAction = true` (player deciding) and one with `waitingForAction = false` and the action already applied (chips moved, player folded, etc.). This gives the renderer enough information to animate every step cleanly.
 
 ---
 
@@ -346,19 +380,44 @@ main.cpp
   └── shows SetupScreen → collects GameConfig {numAI, startingStack, smallBlind, bigBlind}
   └── constructs vector<unique_ptr<IPlayer>> (1 HumanPlayer + N AIPlayers)
   └── constructs GameEngine(players, config)
-  └── game loop:
-        GameEngine::tick()
-          └── makePlayerView(state, activePlayerId) → PlayerView (filtered: own cards only)
-          └── requests Action from active IPlayer::getAction(view)
-                HumanPlayer → blocks on std::future<Action>
-                  ← InputHandler fulfills promise on button click
-                AIPlayer → PromptBuilder::build(view, personality) → OllamaClient (sync HTTP) → parse → Action
-          └── validates and applies Action to GameState
-          └── advances street or hand as needed
-          └── GameRenderer::render(gameState)  ← called every frame from main loop
+  └── worker thread: GameEngine::tick() loop
+        └── lock → set activePlayer, waitingForAction=true → unlock
+        └── makePlayerView(state, activePlayerId) → PlayerView (filtered: own cards only)
+        └── IPlayer::getAction(view)  ← no lock held during this call
+              HumanPlayer → blocks on std::future<Action>
+                ← InputHandler (main thread) fulfills promise on button click
+              AIPlayer → PromptBuilder::build(view, personality) → OllamaClient (sync HTTP) → parse → Action
+        └── lock → waitingForAction=false, apply Action to GameState → unlock
+        └── advances street or hand as needed
+
+  └── main thread: SFML event loop
+        └── GameRenderer::render(engine.getStateSnapshot())  ← every frame
+              reads waitingForAction → shows "Thinking..." / action buttons / idle
+        └── InputHandler::handleEvents() → fulfills HumanPlayer promise on click
 ```
 
-**Threading model:** `GameEngine::tick()` blocks the calling thread (on `std::future` for human input, on synchronous HTTP for AI). To keep the SFML window responsive, `GameEngine` runs on a dedicated worker thread. The main thread runs the SFML event pump and calls `GameRenderer::render()` every frame, reading a snapshot of `GameState` protected by a mutex. `InputHandler` runs on the main thread and fulfills `HumanPlayer`'s promise via the shared promise reference. This design prevents the window from freezing during AI "thinking" time and allows the "Thinking..." overlay to render correctly. Thread safety is scoped to the `GameState` snapshot — `GameEngine` writes state on its thread, `GameRenderer` reads a copy on the main thread.
+**Threading model:** `GameEngine` runs on a dedicated worker thread. The main thread runs the SFML event pump and calls `GameRenderer::render()` every frame via `GameEngine::getStateSnapshot()`.
+
+The mutex (`m_stateMutex`) is held only for short critical sections — never across a `getAction()` call, which can block for seconds. The pattern inside each action step:
+
+```
+worker thread                          main thread
+─────────────────────────────────      ──────────────────────────
+lock → set activePlayer,               getStateSnapshot() → copy
+        waitingForAction=true           (may briefly wait for lock)
+unlock                            ←──  reads "waiting" state, shows animation
+
+getAction() ← blocks here             getStateSnapshot() → copy
+  HumanPlayer: waits on future         reads "waiting" state again (free, no lock needed)
+  AIPlayer: synchronous HTTP
+
+lock → waitingForAction=false,
+        apply action to GameState
+unlock                            ←──  getStateSnapshot() → copy
+                                        reads updated state, animates result
+```
+
+`InputHandler` runs on the main thread and fulfills `HumanPlayer`'s `std::promise<Action>` on button click, unblocking the worker thread. `waitingForAction` in `GameState` tells the renderer which overlay to show — action buttons for the human player, "Thinking..." for AI.
 
 ---
 
@@ -430,14 +489,15 @@ CMake 3.21+ with `FetchContent` for all dependencies. No manual downloads.
 | Phase | Deliverable |
 |---|---|
 | 1 | CMake scaffold, project structure, FetchContent for all deps including PokerHandEvaluator wrapper |
-| 2 | Core layer: Types, Card, Deck, Hand, GameState, GameEngine (no UI, no AI) |
-| 3 | Core layer tests with GoogleTest — GameEngine state machine, betting round logic |
-| 4 | AI layer: ILLMClient, OllamaClient (cpp-httplib), PromptBuilder + personality .md files |
-| 5 | Players layer: IPlayer, HumanPlayer (promise/future), AIPlayer (uses ILLMClient) |
-| 6 | Players layer tests: AIPlayer with MockLLMClient |
-| 7 | UI layer: SetupScreen, GameRenderer, InputHandler |
-| 8 | Wire everything in main.cpp — full playable game |
-| 9 | Polish: additional personality files, prompt tuning, UI refinements |
+| 2 | Core layer: Types, Card, Deck, Hand |
+| 3 | Core layer: GameState, GameEngine, PlayerView, HandEvaluator (C++ pheval interface) |
+| 4 | Core layer tests with GoogleTest — GameEngine state machine, betting round logic |
+| 5 | AI layer: ILLMClient, OllamaClient (cpp-httplib), PromptBuilder + personality .md files |
+| 6 | Players layer: IPlayer, HumanPlayer (promise/future), AIPlayer (uses ILLMClient) |
+| 7 | Players layer tests: AIPlayer with MockLLMClient |
+| 8 | UI layer: SetupScreen, GameRenderer, InputHandler |
+| 9 | Wire everything in main.cpp — full playable game |
+| 10 | Polish: additional personality files, prompt tuning, UI refinements |
 
 ---
 
@@ -449,6 +509,5 @@ CMake 3.21+ with `FetchContent` for all dependencies. No manual downloads.
 - Event-driven architecture (Approach C)
 - Spectator/AI-vs-AI mode
 - Hand replay via event stream recording
-- Full side-pot calculation
 - Self-implemented hand evaluator (guided C++ learning exercise)
 - Logging library integration (e.g. spdlog)

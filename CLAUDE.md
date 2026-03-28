@@ -60,9 +60,9 @@ ai/          → ILLMClient interface, OllamaClient, PromptBuilder
 
 | File | Purpose |
 |---|---|
-| `src/core/Types.hpp` | `PlayerId`, `Action`, `Street`, `Suit`, `Rank` |
-| `src/core/GameState.hpp` | Central game state passed everywhere |
-| `src/core/GameEngine.hpp` | State machine, drives the game loop |
+| `src/core/Types.hpp` | `PlayerId` (opaque identity), `Action`, `Street`, `Suit`, `Rank` |
+| `src/core/GameState.hpp` | Central game state — includes `waitingForAction` (renderer signal) and `totalContributed` (side pots) |
+| `src/core/GameEngine.hpp` | State machine — internal `SeatIndex`/`m_seats`/`m_seatOf` for rotation; `m_handStarted` lifecycle flag |
 | `src/players/IPlayer.hpp` | Interface all players implement |
 | `src/ai/ILLMClient.hpp` | Interface for LLM backends |
 | `src/ai/PromptBuilder.hpp` | Serializes `GameState` → prompt string |
@@ -79,10 +79,12 @@ ai/          → ILLMClient interface, OllamaClient, PromptBuilder
 
 ## Threading Model
 
-- `GameEngine::tick()` blocks on `IPlayer::getAction()` — runs on worker thread
-- SFML event loop + `GameRenderer::render()` run on main thread
+- `GameEngine::tick()` runs on a worker thread — drives the game loop
+- SFML event loop + `GameRenderer::render()` run on the main thread
 - `GameEngine::getStateSnapshot()` returns a mutex-protected copy of `GameState`
-- `HumanPlayer::m_waitingForInput` is `std::atomic<bool>` (read on UI thread, written on engine thread)
+- `m_stateMutex` is acquired granularly inside `runBettingRound()` — released around each `getAction()` call so the renderer can read a fresh snapshot between every individual action
+- `GameState::waitingForAction` signals to the renderer that the engine is blocked on a player's input — used to drive "Thinking..." / action button overlays
+- `HumanPlayer` decouples from SFML via `std::promise<Action>` / `std::future<Action>` (implemented Phase 6)
 
 ## Testing
 

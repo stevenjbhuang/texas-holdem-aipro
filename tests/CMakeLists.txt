@@ -4,6 +4,6 @@ include(CTest)
 include(GoogleTest)
 
 # Sub-test directories — uncomment as we add tests
-# add_subdirectory(core)
+add_subdirectory(core)
 # add_subdirectory(players)
 # add_subdirectory(ai)
