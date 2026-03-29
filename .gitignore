@@ -1,5 +1,7 @@
 # Build output
 build/
+build-cov/
+coverage-html/
 out/
 
 # CMake generated files (in-source build accidents)

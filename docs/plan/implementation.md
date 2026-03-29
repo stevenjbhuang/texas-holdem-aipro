@@ -17,12 +17,14 @@
 | [1](phase-1-cmake-scaffold.md) | CMake Scaffold & Project Structure | CMake, FetchContent, out-of-source builds |
 | [2](phase-2-core-types-card-deck-hand.md) | Core Layer: Types, Card, Deck, Hand | Value types, enum class, operator overloading, PRNG |
 | [3](phase-3-gamestate-gameengine.md) | Core Layer: GameState & GameEngine | State machines, STL containers, const-correctness, mutex |
-| [4](phase-4-core-tests.md) | Core Tests with GoogleTest | Unit testing, test design, mock objects |
+| [4](phase-4-core-tests.md) | Core Tests with GoogleTest | Unit testing, test design, mock objects, coverage |
 | [5](phase-5-ai-layer.md) | AI Layer: ILLMClient, OllamaClient, PromptBuilder | Interfaces, HTTP clients, JSON, prompt engineering |
 | [6](phase-6-players-layer.md) | Players Layer: IPlayer, HumanPlayer, AIPlayer | Pure virtual interfaces, std::promise/future, std::atomic |
 | [7](phase-7-ui-layer.md) | UI Layer: SFML Setup, Renderer, Input | Game loop, SFML basics, thread-safe rendering |
 | [8](phase-8-wire-up.md) | Wire It All Together | Dependency wiring, std::thread, RAII, config loading |
 | [9](phase-9-polish.md) | Polish & AI Tuning | Prompt tuning, personalities, renderer polish |
+| [10](phase-10-online-multiplayer.md) | **Extension:** Online Multiplayer | Client-server architecture, protocol design, NetworkPlayer, serialisation |
+| [11](phase-11-llm-integration.md) | **Extension:** LLM API & Custom Model Server | Factory pattern, ClaudeClient, OpenAI-compat, async I/O, fine-tuning, ELO evaluation |
 
 ---
 
@@ -50,6 +52,7 @@ rm -rf build && cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 ## Related docs
 
 - [Design Spec](../spec/design.md) — architecture, components, data flow
+- [Texas Hold'em Rules](../rules/texas-holdem.md) — game rules reference for developers; also injectable into AI prompts via `config/rules.md`
 - [Guides](../guides/) — per-topic learning guides added as we build each phase
   - [Pointers & smart pointers](../guides/pointers.md)
   - [Interfaces & virtual dispatch](../guides/interfaces.md)

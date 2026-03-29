@@ -13,7 +13,7 @@
 
 Before writing any tests you need the CMake target and the subdirectory hook. Without these, `ctest` will find zero tests even if your `.cpp` files compile fine.
 
-- [ ] Create `tests/core/CMakeLists.txt`:
+- [x] Create `tests/core/CMakeLists.txt`:
 
 ```cmake
 add_executable(core_tests
@@ -32,9 +32,9 @@ target_link_libraries(core_tests PRIVATE
 gtest_discover_tests(core_tests)
 ```
 
-- [ ] Uncomment `add_subdirectory(core)` in `tests/CMakeLists.txt`.
+- [x] Uncomment `add_subdirectory(core)` in `tests/CMakeLists.txt`.
 
-- [ ] Verify the build wires up correctly (no tests written yet — just confirm it compiles):
+- [x] Verify the build wires up correctly (no tests written yet — just confirm it compiles):
 
 ```bash
 cmake --build build -j$(nproc)
@@ -159,7 +159,7 @@ gtest_discover_tests(core_tests)
 
 `Card` is a pure value type — it holds a rank and a suit, and provides string representations and comparison operators. These are the simplest tests in the project. The goal is to verify the public interface behaves exactly as documented: equality, ordering, and both string formats.
 
-- [ ] Create `tests/core/test_card.cpp`. Write tests for:
+- [x] Create `tests/core/test_card.cpp`. Write tests for:
   - Two cards with the same rank and suit are equal (`operator==`)
   - Two cards with different ranks are not equal (`operator!=`)
   - `operator<` orders by rank (Two < Ace)
@@ -274,7 +274,7 @@ TEST(CardTest, ToShortStringFormat) {
 
 `Deck` is a stateful object — it changes every time you call `deal()`. Testing stateful objects requires thinking about *sequences* of operations, not just single calls. The four tests below cover the most important invariants: initial state, exhaustion, uniqueness, and reset.
 
-- [ ] Create `tests/core/test_deck.cpp`. Write tests for:
+- [x] Create `tests/core/test_deck.cpp`. Write tests for:
   - A fresh deck has exactly 52 cards
   - After dealing all 52, `deal()` throws `std::out_of_range`
   - No duplicate cards after dealing all 52 (use `std::set`)
@@ -392,7 +392,7 @@ TEST(DeckTest, ResetRestores52Cards) {
 
 `HandEvaluator` wraps a C library that assigns numeric scores to poker hands (lower = stronger). The key insight for testing it: **construct hands manually** using specific `Card` values. Never use `Deck::deal()` in evaluator tests — the result depends on shuffle order and is unpredictable.
 
-- [ ] Create `tests/core/test_hand_evaluator.cpp`. Write tests for:
+- [x] Create `tests/core/test_hand_evaluator.cpp`. Write tests for:
   - Royal flush beats straight flush
   - Four of a kind beats full house
   - Full house beats flush
@@ -542,7 +542,7 @@ TEST(HandEvaluatorTest, IdenticalHandsTie) {
 
 `GameEngine` depends on `IPlayer` — an abstract interface. You can't instantiate it directly, and you don't want to use real `HumanPlayer` or `AIPlayer` in unit tests (they have threading and network dependencies). A `MockPlayer` is a minimal concrete `IPlayer` that returns a fixed action, giving you full control over what happens in the test.
 
-- [ ] Create `tests/core/MockPlayer.hpp`:
+- [x] Create `tests/core/MockPlayer.hpp`:
 
 ```cpp
 #pragma once
@@ -565,7 +565,7 @@ private:
 };
 ```
 
-- [ ] Create `tests/core/test_game_engine.cpp`. Write tests for:
+- [x] Create `tests/core/test_game_engine.cpp`. Write tests for:
   - After construction, each player has a non-zero chip count
   - Blinds are deducted from the correct players' stacks on construction
   - After construction, each active player has hole cards in the snapshot
@@ -703,7 +703,7 @@ TEST(GameEngineTest, FoldingPlayerAddedToFoldedSet) {
 
 ### Task 4.6: Build and run all tests
 
-- [ ] Build and run:
+- [x] Build and run:
 
 ```bash
 cmake --build build -j$(nproc) && cd build && ctest --output-on-failure
@@ -720,6 +720,81 @@ Expected output ends with:
 git add tests/core/ tests/CMakeLists.txt
 git commit -m "test(core): add GoogleTest tests for Card, Deck, HandEvaluator, GameEngine"
 ```
+
+---
+
+### Task 4.7: Generate a coverage report
+
+Passing tests confirm that tested behaviour is correct. Coverage tells you what behaviour you *didn't* test. This task adds a coverage script and shows you how to read the output.
+
+- [ ] Make sure `gcovr` is available:
+
+```bash
+python -m pip install gcovr
+```
+
+- [ ] Run the coverage script (already in the repo):
+
+```bash
+bash scripts/coverage.sh
+```
+
+The script: configures a separate `build-cov/` with `--coverage -O0`, builds, runs all tests, then prints a terminal summary and writes an HTML report to `coverage-html/index.html`.
+
+- [ ] Look at the terminal summary. It prints three numbers:
+
+```
+lines:    72.0% (262 out of 364)
+functions: 92.5% (37 out of 40)
+branches:  37.6% (160 out of 426)
+```
+
+- [ ] Open `coverage-html/index.html` in a browser. Click into `GameEngine.cpp` and look at the red lines. Note which game paths are untested.
+
+- [ ] Identify at least two untested code paths in `GameEngine.cpp` from the `Missing` column and write them down. (You don't need to write tests for them now — just recognise what they are.)
+
+<details>
+<summary>Concepts</summary>
+
+> **Concept: Line coverage vs branch coverage**
+>
+> Line coverage counts whether a line was *executed at all*. Branch coverage counts whether every conditional branch (both the true and false arm of every `if`, every `case` in a `switch`) was taken.
+>
+> Branch coverage is stricter:
+>
+> ```cpp
+> if (active <= 1) break;   // ← line coverage: did this line run? (yes, if active was ever 1)
+>                           // ← branch coverage: did active > 1 also happen? were both arms taken?
+> ```
+>
+> A file can show 100% line coverage but 50% branch coverage if every `if` always evaluated the same way. That's why the branch number (37.6%) is much lower than the line number (72%) — the tests only exercise certain game paths.
+
+> **Concept: Why `build-cov/` is separate from `build/`**
+>
+> Coverage instrumentation (`--coverage -O0`) adds profiling hooks to every function and disables optimisation. The resulting binary is slower and larger, and the generated `.gcda` data files live next to the object files. Keeping it in `build-cov/` means your normal `build/` stays clean and fast — you don't accidentally run the game with coverage overhead.
+
+> **Concept: What low coverage tells you**
+>
+> Low coverage on `GameEngine.cpp` (69% lines) means the multi-street paths (Flop, Turn, River, Showdown), the Raise branch, and side-pot evaluation are untested. These are exactly the paths where the two bugs fixed in this session were hiding. Coverage doesn't prove correctness — 100% coverage can still have wrong logic — but it tells you where your test suite has blind spots.
+
+> **Concept: `main.cpp` at 0% is expected**
+>
+> The `main()` function starts the SFML window and game loop — you can't easily run that in a unit test. 0% coverage on `main.cpp` is normal and acceptable. Coverage tools typically let you exclude files like this with `--exclude` patterns if you want a cleaner headline number.
+
+**Questions — think through these before checking answers:**
+1. The branch coverage is 37.6% even though line coverage is 72%. Name one branch in `GameEngine.cpp` that is never taken by the current tests.
+2. Why is `-O0` required for accurate coverage? What goes wrong if you use `-O2`?
+
+</details>
+
+<details>
+<summary>Answers</summary>
+
+**Q1.** Many valid answers. One clear example: the `Raise` branch inside `runBettingRound()`. All `MockPlayer` instances return `Fold` or `Call` — no test ever raises, so that entire `case Action::Type::Raise:` block is uncovered. Another: the `advanceStreet()` paths for Flop, Turn, and River — the hand always ends after pre-flop (one player folds), so community cards are never dealt in the current tests.
+
+**Q2.** With `-O2`, the compiler can eliminate branches entirely (e.g. a constant condition), merge basic blocks, inline functions, and reorder code. The coverage tool maps execution data back to source lines, but after heavy optimisation the mapping is unreliable — a line that the compiler merged or eliminated may show as covered even if the logic it contained never ran, or as uncovered even though equivalent logic did run. `-O0` keeps the compiled binary structurally close to the source, so coverage data is trustworthy.
+
+</details>
 
 ---
 
