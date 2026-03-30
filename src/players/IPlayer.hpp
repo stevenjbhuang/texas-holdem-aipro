@@ -2,6 +2,7 @@
 #include "core/PlayerView.hpp"
 #include "core/Hand.hpp"
 #include "core/Types.hpp"
+#include <string>
 
 namespace poker {
 
@@ -10,6 +11,7 @@ public:
 
     virtual ~IPlayer() = default;
     virtual PlayerId getId() const = 0;
+    virtual std::string getName() const = 0;
     virtual void dealHoleCards(const Hand& cards) = 0;
     virtual Action getAction(const PlayerView& view) = 0;
 };
