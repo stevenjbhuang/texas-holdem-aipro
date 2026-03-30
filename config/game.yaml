@@ -1,0 +1,6 @@
+llm:
+  model: "glm-4.7-flash:latest" 
+  endpoint: "http://localhost:11434"
+  connection_timeout: 5
+  read_timeout: 120
+  think: true           # enable chain-of-thought reasoning (recommended for qwen3)

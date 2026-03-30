@@ -7,13 +7,17 @@
 namespace poker {
 
 std::pair<std::string, std::string> parseHostPort(const std::string& endpoint) {
-    size_t colonPos = endpoint.find(':');
+    // Strip scheme prefix (e.g. "http://", "https://")
+    size_t schemeEnd = endpoint.find("://");
+    std::string rest = (schemeEnd != std::string::npos)
+                       ? endpoint.substr(schemeEnd + 3)
+                       : endpoint;
+
+    size_t colonPos = rest.rfind(':');
     if (colonPos == std::string::npos) {
-        return {endpoint, "80"};
+        return {rest, "80"};
     }
-    std::string host = endpoint.substr(0, colonPos);
-    std::string port = endpoint.substr(colonPos + 1);
-    return {host, port};
+    return {rest.substr(0, colonPos), rest.substr(colonPos + 1)};
 }
 
 std::string OllamaClient::sendPrompt(const std::string& prompt) {
@@ -23,9 +27,10 @@ std::string OllamaClient::sendPrompt(const std::string& prompt) {
     client.set_read_timeout(m_readTimeout);
 
     nlohmann::json requestBody = {
-        {"model", m_model},
+        {"model",  m_model},
         {"prompt", prompt},
-        {"stream", false}
+        {"stream", false},
+        {"think",  m_think}
     };
 
     auto response = client.Post(

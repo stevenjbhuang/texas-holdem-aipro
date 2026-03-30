@@ -23,5 +23,6 @@ add_subdirectory(tests)
 # Main executable target
 add_executable(texas-holdem src/main.cpp)
 target_link_libraries(texas-holdem PRIVATE
-    # layers linked here as we build them
+    poker_ui
+    yaml-cpp
 )
