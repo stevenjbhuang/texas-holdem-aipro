@@ -56,6 +56,21 @@ ai/          → ILLMClient interface, OllamaClient, PromptBuilder
 - No `using namespace std` in headers
 - C++17 standard (`-std=c++17`, extensions off)
 
+## Task Complexity
+
+### Threshold
+
+Before acting on any task, classify it:
+
+- **Simple:** Single-site change where the cause is obvious without reading other files. Examples: formatting, typo, renaming, isolated off-by-one with a clear fix.
+- **Complex:** Anything that touches multiple files, involves threading or shared state, requires understanding caller/callee relationships, or where the root cause is not immediately obvious from the stated symptom.
+
+### Self-Trigger Rule
+
+For **complex** tasks: before proposing any solution, read `.claude/skills/diagnose-first.md` and follow the four-stage checklist it defines. Do not skip this even when a task "seems obvious" — that is precisely when wrong-root-cause errors most often occur.
+
+For **simple** tasks: proceed directly, keep the response concise.
+
 ## Key Files
 
 | File | Purpose |
