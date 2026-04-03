@@ -63,7 +63,9 @@ ai/          → ILLMClient interface, OllamaClient, PromptBuilder
 Before acting on any task, classify it:
 
 - **Simple:** Single-site change where the cause is obvious without reading other files. Examples: formatting, typo, renaming, isolated off-by-one with a clear fix.
-- **Complex:** Anything that touches multiple files, involves threading or shared state, requires understanding caller/callee relationships, or where the root cause is not immediately obvious from the stated symptom.
+- **Complex:** Anything that touches multiple files, involves threading logic or mutable shared state across multiple functions or threads, requires understanding caller/callee relationships, or where the root cause is not immediately obvious from the stated symptom.
+
+**Confidence check:** If the fix can be stated in one sentence without referring to other files, it is Simple.
 
 ### Self-Trigger Rule
 
