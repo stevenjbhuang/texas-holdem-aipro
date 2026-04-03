@@ -1,5 +1,7 @@
 #include "ui/GameRenderer.hpp"
+#include "ui/LetterboxView.hpp"
 #include <algorithm>
+#include <iostream>
 #include <string>
 
 namespace poker {
@@ -37,44 +39,311 @@ static const sf::Vector2f SEATS[] = {
     { 18.f, 248.f},   // 5 — left
     { 78.f, 432.f},   // 6 — bottom-left
 };
-static constexpr int   MAX_SEATS    = 7;
-static constexpr float PANEL_W      = 130.f;
-static constexpr float PANEL_H      =  52.f;
-static constexpr float CARD_W       =  50.f;
-static constexpr float CARD_H       =  70.f;
-static constexpr float CARD_GAP     =   8.f;   // gap between adjacent cards
+static constexpr int   MAX_SEATS      = 7;
+static constexpr float PANEL_W        = 130.f;
+static constexpr float PANEL_H        =  52.f;
+static constexpr float CARD_W         =  50.f;
+static constexpr float CARD_H         =  70.f;
+static constexpr float CARD_GAP       =   8.f;
+static constexpr float ACTION_BADGE_H =  22.f;
+
+// Deck origin — conceptual position cards slide from.
+static constexpr float DECK_X = 400.f;
+static constexpr float DECK_Y = 148.f;
+
+// Pot centre — where chips travel to and from.
+static constexpr float POT_X = 400.f;
+static constexpr float POT_Y = 248.f;
+
+// Source card image dimensions (all assets/cards/*.png are this size)
+static constexpr float SRC_CARD_W = 500.f;
+static constexpr float SRC_CARD_H = 726.f;
+
+// ── Asset name helpers ────────────────────────────────────────────────────────
+
+static std::string rankName(Rank r) {
+    switch (r) {
+        case Rank::Two:   return "2";
+        case Rank::Three: return "3";
+        case Rank::Four:  return "4";
+        case Rank::Five:  return "5";
+        case Rank::Six:   return "6";
+        case Rank::Seven: return "7";
+        case Rank::Eight: return "8";
+        case Rank::Nine:  return "9";
+        case Rank::Ten:   return "10";
+        case Rank::Jack:  return "jack";
+        case Rank::Queen: return "queen";
+        case Rank::King:  return "king";
+        case Rank::Ace:   return "ace";
+    }
+    return "";
+}
+
+static std::string suitName(Suit s) {
+    switch (s) {
+        case Suit::Hearts:   return "hearts";
+        case Suit::Diamonds: return "diamonds";
+        case Suit::Clubs:    return "clubs";
+        case Suit::Spades:   return "spades";
+    }
+    return "";
+}
+
+// ── Constructor ───────────────────────────────────────────────────────────────
 
 GameRenderer::GameRenderer(sf::RenderWindow& window, sf::Font& font)
-    : m_window(window), m_font(font) {}
-
-void GameRenderer::render(const GameState& state, PlayerId humanId)
+    : m_window(window), m_font(font)
 {
-    m_window.clear(sf::Color(0, 90, 0));
+    reloadAssets();
+}
+
+void GameRenderer::reloadAssets()
+{
+    if (!m_tableTexture.loadFromFile("assets/table/table_top.png"))
+        std::cerr << "Warning: could not load assets/table/table_top.png — using plain felt\n";
+
+    static constexpr Rank ranks[] = {
+        Rank::Two, Rank::Three, Rank::Four, Rank::Five, Rank::Six,
+        Rank::Seven, Rank::Eight, Rank::Nine, Rank::Ten,
+        Rank::Jack, Rank::Queen, Rank::King, Rank::Ace
+    };
+    static constexpr Suit suits[] = {
+        Suit::Hearts, Suit::Diamonds, Suit::Clubs, Suit::Spades
+    };
+
+    for (Suit suit : suits) {
+        for (Rank rank : ranks) {
+            std::string path = "assets/cards/" + rankName(rank) + "_of_" + suitName(suit) + ".png";
+            if (!m_cardTextures[{rank, suit}].loadFromFile(path))
+                std::cerr << "Warning: could not load " << path << "\n";
+        }
+    }
+
+    if (!m_cardBackTexture.loadFromFile("assets/cards/black_joker.png"))
+        std::cerr << "Warning: could not load assets/cards/black_joker.png\n";
+
+    if (!m_chipTexture.loadFromFile("assets/chips/chip_blue_top_large.png"))
+        std::cerr << "Warning: could not load chip texture for animations\n";
+}
+
+// ── seatPos ───────────────────────────────────────────────────────────────────
+// Returns the screen position of a player's seat panel, using the same ordering
+// as render(): human → SEATS[0], others in ascending PlayerId order (std::map).
+
+sf::Vector2f GameRenderer::seatPos(PlayerId id, const GameState& state) const
+{
+    if (id == m_humanId) return SEATS[0];
+    int idx = 1;
+    for (auto& [pid, _] : state.chipCounts) {
+        if (pid == m_humanId) continue;
+        if (pid == id) return (idx < MAX_SEATS) ? SEATS[idx] : SEATS[MAX_SEATS - 1];
+        ++idx;
+    }
+    return SEATS[0];
+}
+
+// ── detectDelta ───────────────────────────────────────────────────────────────
+
+void GameRenderer::detectDelta(const GameState& curr,
+                                AnimationManager& animMgr,
+                                SoundManager& soundMgr)
+{
+    // First frame: no previous state to diff against.
+    if (m_prevSnapshot.chipCounts.empty()) {
+        m_prevSnapshot = curr;
+        return;
+    }
+
+    // Street change: clear stale badge animations before the new street begins.
+    if (curr.street != m_prevSnapshot.street)
+        animMgr.clear();
+
+    // ── New community cards ───────────────────────────────────────────────────
+    int prevCC = static_cast<int>(m_prevSnapshot.communityCards.size());
+    int currCC = static_cast<int>(curr.communityCards.size());
+    if (currCC > prevCC) {
+        soundMgr.post(SoundEvent::Deal);
+        for (int i = prevCC; i < currCC; ++i) {
+            float x = 259.f + i * (CARD_W + CARD_GAP);
+            Anim a;
+            a.type     = AnimType::SlideCard;
+            a.from     = {DECK_X, DECK_Y};
+            a.to       = {x, 265.f};
+            a.card     = curr.communityCards[i];
+            a.duration = 0.25f;
+            a.delay    = (i - prevCC) * 0.15f;
+            a.maskKey  = "card:community:" + std::to_string(i);
+            animMgr.enqueue(a);
+        }
+    }
+
+    // ── New hole cards (start of hand) ────────────────────────────────────────
+    bool dealtHoles = false;
+    float holeDelay = 0.f;
+    for (auto& [pid, hand] : curr.holeCards) {
+        if (m_prevSnapshot.holeCards.count(pid) > 0) continue;
+
+        if (!dealtHoles) {
+            soundMgr.post(SoundEvent::Deal);
+            dealtHoles = true;
+        }
+
+        sf::Vector2f pos    = seatPos(pid, curr);
+        bool         human  = (pid == m_humanId);
+        float        cardY  = pos.y + PANEL_H + ACTION_BADGE_H + 4.f;
+
+        sf::Vector2f to0 = human ? sf::Vector2f{346.f, 516.f}
+                                 : sf::Vector2f{pos.x + 2.f, cardY};
+        sf::Vector2f to1 = human ? sf::Vector2f{404.f, 516.f}
+                                 : sf::Vector2f{pos.x + 2.f + CARD_W + CARD_GAP, cardY};
+
+        Anim a0;
+        a0.type     = AnimType::SlideCard;
+        a0.from     = {DECK_X, DECK_Y};
+        a0.to       = to0;
+        a0.card     = hand.first;
+        a0.faceDown = !human;
+        a0.duration = 0.25f;
+        a0.delay    = holeDelay;
+        a0.maskKey  = "card:hole:" + std::to_string(pid) + ":0";
+        animMgr.enqueue(a0);
+
+        Anim a1     = a0;
+        a1.to       = to1;
+        a1.card     = hand.second;
+        a1.delay    = holeDelay + 0.12f;
+        a1.maskKey  = "card:hole:" + std::to_string(pid) + ":1";
+        animMgr.enqueue(a1);
+
+        holeDelay += 0.20f;
+    }
+
+    // ── Chip movements (player bets / raises) ─────────────────────────────────
+    for (auto& [pid, bet] : curr.currentBets) {
+        int prevBet = m_prevSnapshot.currentBets.count(pid)
+                      ? m_prevSnapshot.currentBets.at(pid) : 0;
+        if (bet > prevBet) {
+            Anim a;
+            a.type     = AnimType::SlideChip;
+            a.from     = seatPos(pid, curr);
+            a.to       = {POT_X, POT_Y};
+            a.duration = 0.30f;
+            animMgr.enqueue(a);
+            soundMgr.post(SoundEvent::Chip);
+        }
+    }
+
+    // ── Action badges (non-human players only) ────────────────────────────────
+    for (auto& [pid, action] : curr.lastActions) {
+        if (pid == m_humanId) continue;
+
+        bool isNew     = (m_prevSnapshot.lastActions.count(pid) == 0);
+        bool isChanged = !isNew &&
+                         (m_prevSnapshot.lastActions.at(pid).type   != action.type ||
+                          m_prevSnapshot.lastActions.at(pid).amount != action.amount);
+        if (!isNew && !isChanged) continue;
+
+        std::string  badgeText;
+        sf::Color    badgeColor;
+        switch (action.type) {
+            case Action::Type::Fold:
+                badgeText  = "Fold";
+                badgeColor = sf::Color(220, 80, 80);
+                soundMgr.post(SoundEvent::Fold);
+                break;
+            case Action::Type::Call:
+                if (action.amount == 0) {
+                    badgeText  = "Check";
+                    badgeColor = sf::Color(100, 200, 255);
+                } else {
+                    badgeText  = "Call $" + std::to_string(action.amount);
+                    badgeColor = sf::Color(80, 200, 120);
+                }
+                break;
+            case Action::Type::Raise:
+                badgeText  = "Raise $" + std::to_string(action.amount);
+                badgeColor = sf::Color(255, 210, 60);
+                break;
+        }
+
+        Anim a;
+        a.type     = AnimType::FadeBadge;
+        a.from     = seatPos(pid, curr);
+        a.text     = badgeText;
+        a.color    = badgeColor;
+        a.duration = 1.2f;
+        animMgr.enqueue(a);
+    }
+
+    // ── Winner spotlight ──────────────────────────────────────────────────────
+    if (!curr.showdownWinners.empty() && m_prevSnapshot.showdownWinners.empty()) {
+        // Use prev pot value in case it was already distributed in this snapshot.
+        int potAmt = (m_prevSnapshot.pot > 0) ? m_prevSnapshot.pot : curr.pot;
+        soundMgr.post(SoundEvent::Win);
+
+        for (PlayerId winner : curr.showdownWinners) {
+            sf::Vector2f wPos = seatPos(winner, curr);
+
+            Anim chip;
+            chip.type     = AnimType::SlideChip;
+            chip.from     = {POT_X, POT_Y};
+            chip.to       = wPos;
+            chip.duration = 0.35f;
+            animMgr.enqueue(chip);
+
+            Anim ft;
+            ft.type     = AnimType::FloatText;
+            ft.from     = wPos;
+            ft.text     = "+$" + std::to_string(potAmt);
+            ft.duration = 0.9f;
+            animMgr.enqueue(ft);
+
+            Anim fp;
+            fp.type     = AnimType::FadePanel;
+            fp.from     = wPos;
+            fp.size     = {PANEL_W, PANEL_H};
+            fp.duration = 0.8f;
+            animMgr.enqueue(fp);
+        }
+    }
+
+    m_prevSnapshot = curr;
+}
+
+// ── render ────────────────────────────────────────────────────────────────────
+
+void GameRenderer::render(const GameState& state, PlayerId humanId,
+                           AnimationManager& animMgr)
+{
+    m_humanId = humanId;
+    m_window.clear(sf::Color::Black);
 
     drawTable();
-    drawCommunityCards(state);
+    drawCommunityCards(state, animMgr);
     drawPot(state);
     drawStreetLabel(state);
-    drawShowdownHands(state);
 
-    // Build player list with human always at index 0 (SEATS[0]).
+    // Build player list: human at SEATS[0], others in ascending PlayerId order.
+    // chipCounts is std::map so iteration order is deterministic — seat positions
+    // are stable across frames as long as chipCounts stays a std::map.
     std::vector<PlayerId> players;
     players.push_back(humanId);
     for (auto& [id, _] : state.chipCounts)
         if (id != humanId) players.push_back(id);
 
     for (int i = 0; i < static_cast<int>(players.size()) && i < MAX_SEATS; ++i)
-        drawPlayer(players[i], state, SEATS[i], players[i] == humanId);
+        drawPlayer(players[i], state, SEATS[i], players[i] == humanId, animMgr);
 
-    // Human's hole cards — centered below the human seat panel.
+    // Human hole cards — skip any card still animating in.
     if (state.holeCards.count(humanId)) {
         const Hand& h = state.holeCards.at(humanId);
-        // Two cards centred under the panel (panel centre x = 335 + 65 = 400).
-        drawCard(h.first,  {346.f, 516.f});
-        drawCard(h.second, {404.f, 516.f});
+        std::string prefix = "card:hole:" + std::to_string(humanId);
+        if (!animMgr.isMasked(prefix + ":0")) drawCard(h.first,  {346.f, 516.f});
+        if (!animMgr.isMasked(prefix + ":1")) drawCard(h.second, {404.f, 516.f});
     }
 
-    // "Thinking…" — top-right, away from street label.
+    // "Thinking…" indicator.
     if (state.waitingForAction && state.activePlayer != humanId) {
         sf::Text thinking("Thinking...", m_font, 18);
         thinking.setFillColor(sf::Color::Yellow);
@@ -83,34 +352,91 @@ void GameRenderer::render(const GameState& state, PlayerId humanId)
         thinking.setPosition(800.f - tb.width - 14.f, 12.f);
         m_window.draw(thinking);
     }
+
+    // Draw all in-flight animations on top of the static scene.
+    animMgr.draw(m_window, m_font, m_cardTextures, m_cardBackTexture, m_chipTexture);
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
 
 void GameRenderer::drawTable()
 {
-    sf::RectangleShape felt(sf::Vector2f(580.f, 270.f));
-    felt.setPosition(110.f, 148.f);
-    felt.setFillColor(sf::Color(0, 110, 0));
-    felt.setOutlineColor(sf::Color(101, 67, 33));
-    felt.setOutlineThickness(10.f);
-    m_window.draw(felt);
+    if (m_tableTexture.getSize().x > 0) {
+        sf::Sprite table(m_tableTexture);
+        float srcW  = static_cast<float>(m_tableTexture.getSize().x);
+        float srcH  = static_cast<float>(m_tableTexture.getSize().y);
+        float scale = std::min(LOGICAL_W / srcW, LOGICAL_H / srcH);
+        table.setScale(scale, scale);
+        table.setPosition((LOGICAL_W - srcW * scale) / 2.f, (LOGICAL_H - srcH * scale) / 2.f);
+        m_window.draw(table);
+    } else {
+        sf::RectangleShape felt(sf::Vector2f(580.f, 270.f));
+        felt.setPosition(110.f, 148.f);
+        felt.setFillColor(sf::Color(0, 110, 0));
+        felt.setOutlineColor(sf::Color(101, 67, 33));
+        felt.setOutlineThickness(10.f);
+        m_window.draw(felt);
+    }
 }
 
-void GameRenderer::drawPlayer(PlayerId id, const GameState& state, sf::Vector2f pos, bool isHuman)
+void GameRenderer::drawCard(const Card& card, sf::Vector2f pos)
 {
-    bool folded = state.foldedPlayers.count(id) > 0;
-    bool active = state.waitingForAction && state.activePlayer == id;
-    int  chips  = state.chipCounts.count(id)  ? state.chipCounts.at(id)  : 0;
-    int  bet    = state.currentBets.count(id) ? state.currentBets.at(id) : 0;
-    bool busted = (chips == 0 && bet == 0);
+    auto it = m_cardTextures.find({card.getRank(), card.getSuit()});
+    if (it != m_cardTextures.end() && it->second.getSize().x > 0) {
+        sf::Sprite sprite(it->second);
+        sprite.setScale(CARD_W / SRC_CARD_W, CARD_H / SRC_CARD_H);
+        sprite.setPosition(pos);
+        m_window.draw(sprite);
+    } else {
+        sf::RectangleShape rect(sf::Vector2f(CARD_W, CARD_H));
+        rect.setPosition(pos);
+        rect.setFillColor(sf::Color::White);
+        rect.setOutlineColor(sf::Color(60, 60, 60));
+        rect.setOutlineThickness(1.f);
+        m_window.draw(rect);
+
+        bool red = card.getSuit() == Suit::Hearts || card.getSuit() == Suit::Diamonds;
+        sf::Text label(card.toShortString(), m_font, 20);
+        label.setFillColor(red ? sf::Color(200, 0, 0) : sf::Color::Black);
+        label.setPosition(pos.x + 6.f, pos.y + 8.f);
+        m_window.draw(label);
+    }
+}
+
+void GameRenderer::drawCardBack(sf::Vector2f pos)
+{
+    if (m_cardBackTexture.getSize().x > 0) {
+        sf::Sprite sprite(m_cardBackTexture);
+        sprite.setScale(CARD_W / SRC_CARD_W, CARD_H / SRC_CARD_H);
+        sprite.setPosition(pos);
+        m_window.draw(sprite);
+    } else {
+        sf::RectangleShape rect(sf::Vector2f(CARD_W, CARD_H));
+        rect.setPosition(pos);
+        rect.setFillColor(sf::Color(30, 50, 140));
+        rect.setOutlineColor(sf::Color(60, 60, 60));
+        rect.setOutlineThickness(1.f);
+        m_window.draw(rect);
+    }
+}
+
+void GameRenderer::drawPlayer(PlayerId id, const GameState& state, sf::Vector2f pos,
+                               bool isHuman, AnimationManager& animMgr)
+{
+    bool folded      = state.foldedPlayers.count(id) > 0;
+    bool active      = state.waitingForAction && state.activePlayer == id;
+    int  chips       = state.chipCounts.count(id)       ? state.chipCounts.at(id)       : 0;
+    int  bet         = state.currentBets.count(id)      ? state.currentBets.at(id)      : 0;
+    int  contributed = state.totalContributed.count(id) ? state.totalContributed.at(id) : 0;
+    bool busted      = (chips == 0 && bet == 0 && contributed == 0);
 
     sf::RectangleShape panel(sf::Vector2f(PANEL_W, PANEL_H));
     panel.setPosition(pos);
-    if      (active)  panel.setFillColor(sf::Color(200, 170,  20));
-    else if (folded)  panel.setFillColor(sf::Color( 60,  60,  60));
-    else if (busted)  panel.setFillColor(sf::Color(100,  20,  20));
-    else              panel.setFillColor(sf::Color( 40,  80,  40));
+    if      (active) panel.setFillColor(sf::Color(200, 170,  20));
+    else if (folded) panel.setFillColor(sf::Color( 60,  60,  60));
+    else if (busted) panel.setFillColor(sf::Color(100,  20,  20));
+    else             panel.setFillColor(sf::Color( 40,  80,  40));
+
     bool isWinner = (state.street == Street::Showdown && state.showdownWinners.count(id) > 0);
     panel.setOutlineColor(isWinner ? sf::Color(255, 220, 80) : sf::Color::Black);
     panel.setOutlineThickness(isWinner ? 3.f : 1.f);
@@ -137,9 +463,7 @@ void GameRenderer::drawPlayer(PlayerId id, const GameState& state, sf::Vector2f 
     chipsText.setFillColor(folded ? sf::Color(140, 140, 140) : sf::Color::White);
     m_window.draw(chipsText);
 
-    // Last action badge — skipped for the human player (hole cards sit immediately
-    // below their panel and would overlap). For all other seats a dark background
-    // rectangle is drawn first so the text is legible on any surface (felt, etc.).
+    // Static action badge (always drawn; FadeBadge overlay in AnimationManager is additive).
     if (!isHuman && state.lastActions.count(id)) {
         const Action& a = state.lastActions.at(id);
         std::string actionStr;
@@ -169,7 +493,6 @@ void GameRenderer::drawPlayer(PlayerId id, const GameState& state, sf::Vector2f 
         float bx = pos.x + 2.f;
         float by = pos.y + PANEL_H + 2.f;
 
-        // Dark backing rect so the badge is readable on the felt or any background.
         sf::RectangleShape backing(sf::Vector2f(tb.width + 8.f, tb.height + 6.f));
         backing.setPosition(bx, by);
         backing.setFillColor(sf::Color(20, 20, 20, 200));
@@ -179,38 +502,43 @@ void GameRenderer::drawPlayer(PlayerId id, const GameState& state, sf::Vector2f 
         actionText.setPosition(bx + 4.f, by + 2.f);
         m_window.draw(actionText);
     }
+
+    // AI hole cards — skip any that are still animating in.
+    if (!isHuman && !folded && state.holeCards.count(id)) {
+        float cardY = pos.y + PANEL_H + ACTION_BADGE_H + 4.f;
+        std::string prefix = "card:hole:" + std::to_string(id);
+
+        if (state.street == Street::Showdown) {
+            const Hand& h = state.holeCards.at(id);
+            if (!animMgr.isMasked(prefix + ":0"))
+                drawCard(h.first,  {pos.x + 2.f,               cardY});
+            if (!animMgr.isMasked(prefix + ":1"))
+                drawCard(h.second, {pos.x + 2.f + CARD_W + CARD_GAP, cardY});
+        } else {
+            if (!animMgr.isMasked(prefix + ":0"))
+                drawCardBack({pos.x + 2.f,               cardY});
+            if (!animMgr.isMasked(prefix + ":1"))
+                drawCardBack({pos.x + 2.f + CARD_W + CARD_GAP, cardY});
+        }
+    }
 }
 
-void GameRenderer::drawCard(const Card& card, sf::Vector2f pos)
-{
-    sf::RectangleShape rect(sf::Vector2f(CARD_W, CARD_H));
-    rect.setPosition(pos);
-    rect.setFillColor(sf::Color::White);
-    rect.setOutlineColor(sf::Color(60, 60, 60));
-    rect.setOutlineThickness(1.f);
-    m_window.draw(rect);
-
-    bool red = card.getSuit() == Suit::Hearts || card.getSuit() == Suit::Diamonds;
-    sf::Text label(card.toShortString(), m_font, 20);
-    label.setFillColor(red ? sf::Color(200, 0, 0) : sf::Color::Black);
-    label.setPosition(pos.x + 6.f, pos.y + 8.f);
-    m_window.draw(label);
-}
-
-void GameRenderer::drawCommunityCards(const GameState& state)
+void GameRenderer::drawCommunityCards(const GameState& state, AnimationManager& animMgr)
 {
     // 5 cards × 50px + 4 gaps × 8px = 282px total; centre at x=400 → start at 259.
     float x = 259.f;
+    int   i = 0;
     for (const Card& c : state.communityCards) {
-        drawCard(c, {x, 265.f});
+        if (!animMgr.isMasked("card:community:" + std::to_string(i)))
+            drawCard(c, {x, 265.f});
         x += CARD_W + CARD_GAP;
+        ++i;
     }
-    // Placeholder slots for undealt cards.
-    for (int i = static_cast<int>(state.communityCards.size()); i < 5; ++i) {
+    for (; i < 5; ++i) {
         sf::RectangleShape slot(sf::Vector2f(CARD_W, CARD_H));
         slot.setPosition(x, 265.f);
-        slot.setFillColor(sf::Color(0, 80, 0));
-        slot.setOutlineColor(sf::Color(0, 140, 0));
+        slot.setFillColor(sf::Color(0, 0, 0, 80));
+        slot.setOutlineColor(sf::Color(255, 255, 255, 60));
         slot.setOutlineThickness(1.f);
         m_window.draw(slot);
         x += CARD_W + CARD_GAP;
@@ -241,64 +569,6 @@ void GameRenderer::drawStreetLabel(const GameState& state)
     st.setFillColor(sf::Color(180, 255, 180));
     st.setPosition(14.f, 12.f);
     m_window.draw(st);
-}
-
-void GameRenderer::drawShowdownHands(const GameState& state)
-{
-    if (state.street != Street::Showdown) return;
-
-    std::vector<PlayerId> revealed;
-    for (const auto& [id, _] : state.chipCounts) {
-        if (state.foldedPlayers.count(id) == 0 && state.holeCards.count(id) > 0)
-            revealed.push_back(id);
-    }
-    if (revealed.empty()) return;
-
-    const int cols = std::min(4, std::max(1, static_cast<int>(revealed.size())));
-    const float startX = 132.f;
-    const float startY = 322.f;
-    const float cellW = 132.f;
-    const float cellH = 70.f;
-
-    auto drawSmallCard = [&](const Card& card, sf::Vector2f pos) {
-        sf::RectangleShape rect(sf::Vector2f(32.f, 44.f));
-        rect.setPosition(pos);
-        rect.setFillColor(sf::Color::White);
-        rect.setOutlineColor(sf::Color(60, 60, 60));
-        rect.setOutlineThickness(1.f);
-        m_window.draw(rect);
-
-        bool red = card.getSuit() == Suit::Hearts || card.getSuit() == Suit::Diamonds;
-        sf::Text label(card.toShortString(), m_font, 13);
-        label.setFillColor(red ? sf::Color(200, 0, 0) : sf::Color::Black);
-        label.setPosition(pos.x + 3.f, pos.y + 4.f);
-        m_window.draw(label);
-    };
-
-    for (int i = 0; i < static_cast<int>(revealed.size()); ++i) {
-        PlayerId id = revealed[i];
-        int row = i / cols;
-        int col = i % cols;
-        float x = startX + col * cellW;
-        float y = startY + row * cellH;
-        bool isWinner = state.showdownWinners.count(id) > 0;
-
-        sf::RectangleShape box(sf::Vector2f(120.f, 60.f));
-        box.setPosition(x, y);
-        box.setFillColor(sf::Color(15, 55, 15, 210));
-        box.setOutlineColor(isWinner ? sf::Color(255, 220, 80) : sf::Color(50, 120, 50));
-        box.setOutlineThickness(isWinner ? 2.f : 1.f);
-        m_window.draw(box);
-
-        sf::Text name("P" + std::to_string(id) + (isWinner ? " WIN" : ""), m_font, 12);
-        name.setFillColor(isWinner ? sf::Color(255, 240, 170) : sf::Color::White);
-        name.setPosition(x + 4.f, y + 3.f);
-        m_window.draw(name);
-
-        const Hand& h = state.holeCards.at(id);
-        drawSmallCard(h.first,  {x + 6.f,  y + 18.f});
-        drawSmallCard(h.second, {x + 44.f, y + 18.f});
-    }
 }
 
 } // namespace poker

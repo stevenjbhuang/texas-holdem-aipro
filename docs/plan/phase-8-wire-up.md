@@ -1,5 +1,7 @@
 # Phase 8 — Wire It All Together in `main.cpp`
 
+> **Status: COMPLETE** (commit `f64bf83`) — main.cpp wires all layers: yaml-cpp config loading, OllamaClient, players, GameEngine on worker thread, SFML game loop. Game is fully playable.
+
 **Concepts you'll learn:** Dependency wiring, threading with `std::thread`, RAII for thread lifetime, config loading with yaml-cpp.
 
 **Previous phase:** [Phase 7 — UI Layer](phase-7-ui-layer.md)

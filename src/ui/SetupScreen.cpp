@@ -1,4 +1,5 @@
 #include "ui/SetupScreen.hpp"
+#include "ui/LetterboxView.hpp"
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -110,11 +111,20 @@ GameConfig SetupScreen::run()
                 return GameConfig(2, m_startingStack, m_smallBlind, m_bigBlind);
             }
 
+            // Keep the letterbox view correct when the user resizes the window.
+            if (event.type == sf::Event::Resized) {
+                m_window.setView(computeLetterboxView({event.size.width, event.size.height}));
+            }
+
             if (event.type == sf::Event::MouseButtonPressed &&
                 event.mouseButton.button == sf::Mouse::Left)
             {
-                float mx = static_cast<float>(event.mouseButton.x);
-                float my = static_cast<float>(event.mouseButton.y);
+                // Map physical pixel coords → logical 800×700 canvas so hit-testing
+                // works correctly regardless of window size or letterbox bars.
+                sf::Vector2f pos = m_window.mapPixelToCoords(
+                    {event.mouseButton.x, event.mouseButton.y});
+                float mx = pos.x;
+                float my = pos.y;
 
                 if (m_minusAI.getGlobalBounds().contains(mx, my)) {
                     m_numAIPlayers = std::max(1, m_numAIPlayers - 1);

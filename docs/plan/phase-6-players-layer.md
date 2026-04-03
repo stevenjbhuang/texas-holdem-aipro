@@ -1,5 +1,7 @@
 # Phase 6 — Players Layer: IPlayer, HumanPlayer, AIPlayer
 
+> **Status: COMPLETE** (commit `0c28c9d`) — IPlayer, HumanPlayer, AIPlayer implemented with tests. All three test suites pass (core_tests, ai_tests, players_tests).
+
 **Concepts you'll learn:** Pure virtual interfaces, `std::promise`/`std::future` for cross-thread communication, `std::atomic`, dependency injection via reference.
 
 **Previous phase:** [Phase 5 — AI Layer](phase-5-ai-layer.md)

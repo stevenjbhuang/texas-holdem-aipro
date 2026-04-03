@@ -10,5 +10,11 @@ target_include_directories(poker_ai PUBLIC
 target_link_libraries(poker_ai PRIVATE
     poker_core
     nlohmann_json::nlohmann_json
+)
+
+# httplib is PUBLIC because OllamaClient.hpp includes httplib.h (needed for
+# the persistent Client member). Consumers that include OllamaClient.hpp
+# need the httplib include path.
+target_link_libraries(poker_ai PUBLIC
     httplib::httplib
 )

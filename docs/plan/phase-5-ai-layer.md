@@ -1,5 +1,7 @@
 # Phase 5 — AI Layer: ILLMClient, OllamaClient, PromptBuilder
 
+> **Status: COMPLETE** (commit `1261049`) — ILLMClient, OllamaClient, PromptBuilder implemented with tests. Note: The SessionMemory extension tasks (Tasks 5.5+) were not implemented — `SessionMemory.hpp/cpp` does not exist.
+
 **Concepts you'll learn:** Pure abstract interfaces, virtual destructors, dependency injection, HTTP clients with cpp-httplib, JSON serialisation with nlohmann/json, prompt engineering.
 
 **Previous phase:** [Phase 4 — Core Tests](phase-4-core-tests.md)

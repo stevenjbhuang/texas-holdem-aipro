@@ -15,12 +15,16 @@ void AIPlayer::dealHoleCards(const Hand& cards) {
 }
 
 Action AIPlayer::getAction(const PlayerView& view) {
+    if (m_client.isStopped()) {
+        return fallbackAction();
+    }
+
     std::string prompt = PromptBuilder::build(view, m_personalityText);
     std::string response = m_client.sendPrompt(prompt);
     
     int retryCount = 0;
     // Simple retry logic for empty responses, which can happen due to LLM errors or timeouts
-    while (response.empty() && retryCount < 3) {
+    while (response.empty() && retryCount < 3 && !m_client.isStopped()) {
         std::cerr << "Received empty response from LLM, retrying..." << std::endl;
         response = m_client.sendPrompt(prompt);
         retryCount++;

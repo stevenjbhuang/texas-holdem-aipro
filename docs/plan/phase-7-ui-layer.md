@@ -1,5 +1,7 @@
 # Phase 7 — UI Layer: SFML Setup, Renderer, Input
 
+> **Status: COMPLETE** (commit `f64bf83`) — SetupScreen, GameRenderer, InputHandler implemented. SFML window opens, cards render, action buttons work.
+
 **Concepts you'll learn:** Game loop pattern, SFML window and drawing primitives, `sf::Font` lifetime, thread-safe state snapshots, hit-testing for buttons.
 
 **Previous phase:** [Phase 6 — Players Layer](phase-6-players-layer.md)

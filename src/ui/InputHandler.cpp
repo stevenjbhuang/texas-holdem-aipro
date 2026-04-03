@@ -118,8 +118,12 @@ void InputHandler::handleEvent(const sf::Event& event, const GameState& state)
     // Mouse wheel over the raise area adjusts the amount.
     if (event.type == sf::Event::MouseWheelScrolled) {
         sf::FloatRect raiseArea(455.f, 594.f, 160.f, 73.f);  // covers stepper + raise button
-        float mx = static_cast<float>(event.mouseWheelScroll.x);
-        float my = static_cast<float>(event.mouseWheelScroll.y);
+        // Convert pixel coords → logical 800×700 space (accounts for resize/fullscreen).
+        sf::Vector2f logical = m_window.mapPixelToCoords(
+            {static_cast<int>(event.mouseWheelScroll.x),
+             static_cast<int>(event.mouseWheelScroll.y)});
+        float mx = logical.x;
+        float my = logical.y;
         if (raiseArea.contains(mx, my) && minRaise <= maxRaise) {
             m_raiseAmount += static_cast<int>(event.mouseWheelScroll.delta) * step;
             m_raiseAmount = std::max(minRaise, std::min(maxRaise, m_raiseAmount));
@@ -130,8 +134,11 @@ void InputHandler::handleEvent(const sf::Event& event, const GameState& state)
     if (event.type != sf::Event::MouseButtonPressed) return;
     if (event.mouseButton.button != sf::Mouse::Left)  return;
 
-    float mx = static_cast<float>(event.mouseButton.x);
-    float my = static_cast<float>(event.mouseButton.y);
+    // Convert pixel coords → logical 800×700 space (accounts for resize/fullscreen).
+    sf::Vector2f logical = m_window.mapPixelToCoords(
+        {event.mouseButton.x, event.mouseButton.y});
+    float mx = logical.x;
+    float my = logical.y;
 
     if (m_foldBtn.getGlobalBounds().contains(mx, my)) {
         m_raiseAmount = 0;

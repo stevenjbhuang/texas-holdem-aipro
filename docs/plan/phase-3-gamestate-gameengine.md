@@ -1,5 +1,7 @@
 # Phase 3 — Core Layer: GameState & GameEngine
 
+> **Status: COMPLETE** (commit `af10ece`) — GameState, PlayerView, HandEvaluator, GameEngine all implemented. Note: Task 3.7 (upgrade to C++ `pheval` interface) was skipped; HandEvaluator still uses the C `evaluate_7cards` API.
+
 **Concepts you'll learn:** State machines, `std::map`, `std::set`, `std::mutex`, `mutable`, thread-safe snapshots, wrapping C libraries, polymorphism via `unique_ptr`, the re-open-on-raise betting rule.
 
 **Previous phase:** [Phase 2 — Core Types, Card, Deck, Hand](phase-2-core-types-card-deck-hand.md)

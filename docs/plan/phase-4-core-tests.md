@@ -1,5 +1,7 @@
 # Phase 4 — Core Tests with GoogleTest
 
+> **Status: COMPLETE** (commit `374398c`) — All core tests written and passing: Card, Deck, HandEvaluator, GameEngine with MockPlayer.
+
 **Concepts you'll learn:** Unit testing philosophy, `EXPECT_` vs `ASSERT_`, test fixtures, testing exceptions, testing state machines, mock objects.
 
 **Previous phase:** [Phase 3 — GameState & GameEngine](phase-3-gamestate-gameengine.md)
