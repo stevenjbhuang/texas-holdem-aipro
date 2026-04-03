@@ -1,7 +1,7 @@
 # Animation & Polish System — Design Spec
 
 **Date:** 2026-04-02  
-**Scope:** Add balanced (200–350ms ease-out) animations, a winner spotlight, action badge transitions, and sound effects to the existing SFML render loop.
+**Scope:** Add balanced (200–350ms) animations, a winner spotlight, action badge transitions, and sound effects to the existing SFML render loop. Prefer linear interpolation and simple alpha math throughout — no complex easing or multi-phase timing.
 
 ---
 
@@ -23,12 +23,11 @@ main loop (per frame):
   dt = clock.restart()
   snapshot = engine.getStateSnapshot()
 
-  renderer.detectDelta(snapshot, animMgr, soundMgr)   // diff → enqueue
+  renderer.detectDelta(snapshot, animMgr, soundMgr)   // diff → enqueue anims, fire sounds
   animMgr.update(dt)                                   // advance animations
-  soundMgr.flush()                                     // play pending sounds
 
   renderer.render(snapshot, humanId, animMgr)          // static world (masked elements skipped)
-  animMgr.draw(window)                                 // in-flight elements on top
+                                                       // animMgr.draw() called at end of render()
   inputHandler.drawButtons(snapshot)
   window.display()
 ```
@@ -40,7 +39,7 @@ main loop (per frame):
 ### Anim struct
 
 ```cpp
-enum class AnimType { SlideCard, SlideChip, FadeBadge, FloatText, PulsePanel };
+enum class AnimType { SlideCard, SlideChip, FadeBadge, FloatText, FadePanel };
 
 struct Anim {
     AnimType    type;
@@ -80,7 +79,7 @@ private:
 ### update(dt) behaviour
 
 - For each `Anim`: if `delay > 0`, decrement delay and skip; otherwise increment `elapsed`.
-- Progress `t = clamp(elapsed / duration, 0, 1)`, eased: `t = t * t * (3 - 2*t)` (smoothstep).
+- Progress `t = clamp(elapsed / duration, 0, 1)` — plain linear interpolation.
 - When `elapsed >= duration`: remove from `m_anims`, erase `maskKey` from `m_masked`.
 
 ### Mask keys
@@ -99,9 +98,9 @@ Chip slides and float text have no mask key — they are purely additive overlay
 |---|---|
 | `SlideCard` | Card sprite interpolated from `from` → `to` at progress `t` |
 | `SlideChip` | Chip sprite (top-view asset) interpolated from `from` → `to` |
-| `FadeBadge` | Badge text + backing rect; alpha: fade-in 0→255 over first 200ms, hold, fade-out over last 200ms |
-| `FloatText` | `"+$N"` text moves upward 30px and fades out; golden color |
-| `PulsePanel` | Semi-transparent golden rect over winner seat panel; alpha pulses 3× over 1200ms |
+| `FadeBadge` | Badge text + backing rect; alpha linearly fades from 255 → 0 over the full duration |
+| `FloatText` | `"+$N"` text moves upward 30px and fades out linearly; golden color |
+| `FadePanel` | Semi-transparent golden rect over winner panel; alpha linearly fades 150 → 0 over 800ms |
 
 ---
 
@@ -115,7 +114,7 @@ Called once per frame with the new snapshot. Diffs against `m_prevSnapshot` then
 | `holeCards[P]` newly present | 2 × `SlideCard` per player from dealer button position, staggered 150ms | `deal` |
 | `currentBets[P]` increased | `SlideChip` from seat P position → pot centre (400, 248) | `chip` |
 | `lastActions[P]` changed | `FadeBadge` for player P; if action is Fold also post `fold` sound | `fold` or — |
-| `showdownWinners` newly non-empty | `SlideChip` from pot → winner seat; `FloatText` at winner seat; `PulsePanel` | `win` |
+| `showdownWinners` newly non-empty | `SlideChip` from pot → winner seat; `FloatText` at winner seat; `FadePanel` | `win` |
 | `street` changed | No animation; stale badge masks cleared | — |
 
 **Cold-start:** On the very first frame `m_prevSnapshot` is default-constructed (empty). `detectDelta` must guard against this: if `m_prevSnapshot.chipCounts` is empty, skip all delta checks for that frame and just set `m_prevSnapshot = curr`.
@@ -128,20 +127,21 @@ Called once per frame with the new snapshot. Diffs against `m_prevSnapshot` then
 ## SoundManager (`src/ui/SoundManager.hpp/cpp`)
 
 ```cpp
+enum class SoundEvent { Deal, Chip, Fold, Win };
+
 class SoundManager {
 public:
     void loadAll();              // loads assets/sounds/{deal,chip,fold,win}.wav
-    void post(SoundEvent e);     // queues a sound for this frame
-    void flush();                // plays queued sounds; rate-limits same sound to 80ms
+    void post(SoundEvent e);     // plays immediately; restarts if already playing
+    // No flush() needed — playback is fire-and-forget per sf::Sound
 
 private:
-    sf::SoundBuffer m_buffers[4];
-    sf::Sound       m_pool[8];   // SFML requires buffer outlives Sound
-    int             m_poolIdx = 0;
-    float           m_lastPlayed[4] = {};  // timestamp per event type
-    std::vector<SoundEvent> m_pending;
+    sf::SoundBuffer m_buffers[4];  // one per SoundEvent value
+    sf::Sound       m_sounds[4];   // one per SoundEvent; buffer outlives sound
 };
 ```
+
+`post()` calls `m_sounds[e].play()` directly — SFML handles concurrent playback on the same `sf::Sound` by restarting. No pool, no rate-limit bookkeeping, no pending queue.
 
 Sound files: `assets/sounds/deal.wav`, `chip.wav`, `fold.wav`, `win.wav`.  
 All CC0-licensed, sourced during implementation. Target: <100KB total, <0.5s duration each.
@@ -199,9 +199,8 @@ sf::Clock frameClock;
 sf::Time dt = frameClock.restart();
 poker::GameState snapshot = engine.getStateSnapshot();
 
-renderer.detectDelta(snapshot, animMgr, soundMgr);
+renderer.detectDelta(snapshot, animMgr, soundMgr);  // sounds fired here immediately
 animMgr.update(dt);
-soundMgr.flush();
 
 renderer.render(snapshot, humanId, animMgr);   // animMgr.draw() called inside render() as step 7
 inputHandler.drawButtons(snapshot);
