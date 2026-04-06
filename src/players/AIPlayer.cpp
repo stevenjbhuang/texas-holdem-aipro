@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <iostream>
+#include <sstream>
+#include <vector>
 
 namespace poker {
 
@@ -19,33 +21,45 @@ Action AIPlayer::getAction(const PlayerView& view) {
         return fallbackAction();
     }
 
-    std::string prompt = PromptBuilder::build(view, m_personalityText);
-    std::string response = m_client.sendPrompt(prompt);
-    
+    std::string prompt = PromptBuilder::build(view);
+    std::string response = m_client.sendPrompt(prompt, m_personalityText);
+
     int retryCount = 0;
     // Simple retry logic for empty responses, which can happen due to LLM errors or timeouts
     while (response.empty() && retryCount < 3 && !m_client.isStopped()) {
         std::cerr << "Received empty response from LLM, retrying..." << std::endl;
-        response = m_client.sendPrompt(prompt);
+        response = m_client.sendPrompt(prompt, m_personalityText);
         retryCount++;
     }
+
     return parseResponse(response);
 }
 
 Action AIPlayer::parseResponse(const std::string& response) const {
-    std::string upper = response;
-    std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
+    // Scan lines from the end — the model's final decision appears after any
+    // reasoning text, so the last line containing a valid action is authoritative.
+    std::istringstream ss(response);
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (!line.empty()) lines.push_back(line);
+    }
 
-    if (upper.find("FOLD") != std::string::npos) return Action{Action::Type::Fold};
-    if (upper.find("CALL") != std::string::npos) return Action{Action::Type::Call};
+    for (int i = static_cast<int>(lines.size()) - 1; i >= 0; --i) {
+        std::string upper = lines[i];
+        std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
 
-    auto pos = upper.find("RAISE");
-    if (pos != std::string::npos) {
-        try {
-            int amount = std::stoi(upper.substr(pos + 6));
-            return Action{Action::Type::Raise, amount};
-        } catch (...) {
-            return fallbackAction();
+        if (upper.find("FOLD") != std::string::npos) return Action{Action::Type::Fold};
+        if (upper.find("CALL") != std::string::npos) return Action{Action::Type::Call};
+
+        auto pos = upper.find("RAISE");
+        if (pos != std::string::npos) {
+            try {
+                int amount = std::stoi(upper.substr(pos + 6));
+                return Action{Action::Type::Raise, amount};
+            } catch (...) {
+                continue; // malformed raise on this line — keep scanning
+            }
         }
     }
 

@@ -4,6 +4,7 @@ add_library(poker_ui STATIC
     InputHandler.cpp
     AnimationManager.cpp
     SoundManager.cpp
+    DebugPanel.cpp
 )
 
 target_include_directories(poker_ui PUBLIC ${CMAKE_SOURCE_DIR}/src)

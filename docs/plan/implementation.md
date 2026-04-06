@@ -6,7 +6,7 @@
 
 **Architecture:** Three decoupled layers (core / players / ai / ui) communicating through well-defined interfaces. `GameEngine` runs on a worker thread; SFML renders on the main thread.
 
-**Tech Stack:** C++17, CMake 3.21+, SFML 2.6, cpp-httplib, nlohmann/json, yaml-cpp, GoogleTest, PokerHandEvaluator, Ollama (local LLM)
+**Tech Stack:** C++17, CMake 3.21+, SFML 2.6, cpp-httplib (with OpenSSL), nlohmann/json, yaml-cpp, GoogleTest, PokerHandEvaluator, OpenAI-compatible LLM backend (Ollama, llama.cpp, OpenAI, LM Studio)
 
 ---
 

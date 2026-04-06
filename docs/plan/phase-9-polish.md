@@ -1,5 +1,7 @@
 # Phase 9 — Polish & AI Tuning
 
+> **Status: IN PROGRESS** — Tasks 9.2, 9.4 complete; Task 9.3 partially complete (animations done, card sprites not yet). Tasks 9.5–9.6 added during this phase.
+
 **This phase is open-ended — explore at your own pace.**
 
 **Previous phase:** [Phase 8 — Wire It All Together](phase-8-wire-up.md)
@@ -14,26 +16,50 @@
 
 ---
 
-### Task 9.2: Add personality variety
+### Task 9.2: Add personality variety ✅
 
-- [ ] Assign different personality files to each AI player
-- [ ] Add a new personality (e.g. `maniac.md` — raises every hand)
+- [x] Assign different personality files to each AI player (via SetupScreen personality selector)
+- [x] Add new personalities: `aggressive.md` and `cautious.md` in `config/personalities/`
 - [ ] Observe how different personalities affect the game
 
 ---
 
-### Task 9.3: Improve the renderer
+### Task 9.3: Improve the renderer ✅ (partial)
 
 - [ ] Add real card sprites (download a free card asset set to `assets/cards/`)
 - [ ] Show action history log on screen
-- [ ] Animate chip movements
+- [x] Animate chip movements — `AnimationManager` with linear interpolation, `FadePanel`; chip sprites in `assets/chips/`; table texture in `assets/table/`; sound effects in `assets/sounds/` (deal, chip, fold, win)
 
 ---
 
-### Task 9.4: Add a raise input widget
+### Task 9.4: Add a raise input widget ✅
 
-- [ ] Add a slider or text input for the raise amount
-- [ ] Clamp to `[minRaise, playerStack]`
+- [x] Add a stepper input for the raise amount in `InputHandler`
+- [x] Clamp to `[minRaise, playerStack]`
+
+---
+
+### Task 9.5: Multi-backend LLM config ✅
+
+Completed ahead of Phase 11 schedule.
+
+- [x] Replace `OllamaClient` with `OpenAICompatibleClient` (works with Ollama, llama.cpp, OpenAI, LM Studio)
+- [x] Split config into `config/game.yaml` (top-level) and `config/backends/*.yaml` (per-backend)
+  - `config/backends/llamacpp.yaml`, `ollama.yaml`, `openai.yaml` provided
+  - Switch backends by changing one line in `game.yaml`
+- [x] API key support: yaml value or `OPENAI_API_KEY` env var fallback
+- [x] Enable HTTPS via `HTTPLIB_USE_OPENSSL` in `cmake/Dependencies.cmake`
+
+Phase 11 Task 11.2 (`OpenAICompatibleClient`) is now **DONE** — no further work needed there.
+
+---
+
+### Task 9.6: LLM Debug Panel ✅
+
+- [x] `LLMDebugLog` — thread-safe ring buffer (4 entries), also writes to `logs/debug_llm.log`
+- [x] `DebugPanel` — SFML side panel showing last 4 LLM request/response pairs, scrollable
+- [x] Wired via `onPromptComplete` callback on `OpenAICompatibleClient`
+- [x] Enabled only in debug builds (`#ifndef NDEBUG`) and when `debug.panel: true` in `config/game.yaml`
 
 ---
 

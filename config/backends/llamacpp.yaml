@@ -1,0 +1,5 @@
+model: "ggml-org/gemma-4-31B-it-GGUF:Q4_K_M"
+endpoint: "http://localhost:8080"
+connection_timeout: 5
+read_timeout: 120
+max_tokens: 2048

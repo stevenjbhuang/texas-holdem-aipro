@@ -7,14 +7,14 @@
 
 ## Overview
 
-A Texas Hold'em poker game written in C++ with SFML for graphics and LLM-powered AI players via a local Ollama instance. The primary goals are learning modern C++ development practices and building extensible LLM AI players, with a polished playable game as the vehicle.
+A Texas Hold'em poker game written in C++ with SFML for graphics and LLM-powered AI players via any OpenAI-compatible local LLM server (Ollama, llama.cpp, etc.). The primary goals are learning modern C++ development practices and building extensible LLM AI players, with a polished playable game as the vehicle.
 
 ---
 
 ## Goals & Priorities
 
 1. **Learn modern C++** — CMake, interfaces, RAII, smart pointers, STL, clean architecture
-2. **LLM AI players** — AI players backed by a local language model (Ollama), extensible to cloud APIs (Anthropic Claude, OpenAI)
+2. **LLM AI players** — AI players backed by any OpenAI-compatible LLM server (Ollama, llama.cpp), extensible to cloud APIs (Anthropic Claude, OpenAI)
 3. **Playable game** — Human vs AI Texas Hold'em with SFML UI
 4. **Future extensibility** — web UI, event-driven architecture, async AI calls, multiple LLM backends
 
@@ -34,7 +34,7 @@ Three clearly separated layers communicating through well-defined interfaces:
 └─────────────────────────────────────┘
          ↕ (used by players layer)
 ┌─────────────────────────────────────┐
-│         AI Layer                    │  ILLMClient interface, Ollama + future backends
+│         AI Layer                    │  ILLMClient interface, OpenAI-compatible backends
 └─────────────────────────────────────┘
 ```
 
@@ -69,10 +69,9 @@ texas-holdem-aipro/
 │   │   ├── HumanPlayer.hpp/cpp     # Blocks on std::future<Action> fulfilled by InputHandler
 │   │   └── AIPlayer.hpp/cpp        # Builds prompt, calls ILLMClient, parses response
 │   ├── ai/
-│   │   ├── ILLMClient.hpp          # Interface: sendPrompt(string) → string
-│   │   ├── OllamaClient.hpp/cpp    # HTTP POST to local Ollama REST API via cpp-httplib
-│   │   ├── ClaudeClient.hpp/cpp    # Future: Anthropic cloud API
-│   │   └── PromptBuilder.hpp/cpp   # Serializes GameState + personality → prompt string
+│   │   ├── ILLMClient.hpp                  # Interface + LLMConfig struct
+│   │   ├── OpenAICompatibleClient.hpp/cpp  # OpenAI /v1/chat/completions via cpp-httplib
+│   │   └── PromptBuilder.hpp/cpp           # Serializes GameState → user message string
 │   ├── ui/
 │   │   ├── GameRenderer.hpp/cpp    # Draws table, cards, chips, player info
 │   │   ├── SetupScreen.hpp/cpp     # Startup UI: player count, stacks, blinds

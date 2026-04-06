@@ -17,11 +17,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(yaml-cpp)
 
 # ── cpp-httplib ───────────────────────────────────────────
+# HTTPLIB_USE_OPENSSL enables SSLClient for https:// endpoints.
+# Requires: sudo apt install libssl-dev
 FetchContent_Declare(
     httplib
     GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
     GIT_TAG        v0.18.1
 )
+set(HTTPLIB_USE_OPENSSL ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(httplib)
 
 # ── GoogleTest (testing) ──────────────────────────────────

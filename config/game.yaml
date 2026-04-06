@@ -1,6 +1,5 @@
 llm:
-  model: "glm-4.7-flash" 
-  endpoint: "http://localhost:11434"
-  connection_timeout: 5
-  read_timeout: 120
-  think: true           # enable chain-of-thought reasoning (recommended for qwen3)
+  backend: "config/backends/llamacpp.yaml"   # switch to ollama.yaml or openai.yaml to change backend
+
+debug:
+  panel: true    # show LLM request/response panel (debug builds only)

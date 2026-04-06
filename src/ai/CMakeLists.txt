@@ -1,5 +1,5 @@
 add_library(poker_ai STATIC
-    OllamaClient.cpp
+    OpenAICompatibleClient.cpp
     PromptBuilder.cpp
 )
 
@@ -12,8 +12,8 @@ target_link_libraries(poker_ai PRIVATE
     nlohmann_json::nlohmann_json
 )
 
-# httplib is PUBLIC because OllamaClient.hpp includes httplib.h (needed for
-# the persistent Client member). Consumers that include OllamaClient.hpp
+# httplib is PUBLIC because OpenAICompatibleClient.hpp includes httplib.h (needed for
+# the persistent Client member). Consumers that include OpenAICompatibleClient.hpp
 # need the httplib include path.
 target_link_libraries(poker_ai PUBLIC
     httplib::httplib

@@ -28,23 +28,25 @@ InputHandler::InputHandler(sf::RenderWindow& window, sf::Font& font, HumanPlayer
     m_raisePlusBtn.setFillColor(sf::Color(60, 90, 60));
 }
 
+InputHandler::RaiseBounds InputHandler::computeBounds(const GameState& state) const
+{
+    PlayerId id = state.activePlayer;
+    int maxBet  = 0;
+    for (auto& [pid, bet] : state.currentBets)
+        maxBet = std::max(maxBet, bet);
+    int myBet    = state.currentBets.count(id) ? state.currentBets.at(id) : 0;
+    int myChips  = state.chipCounts.count(id)  ? state.chipCounts.at(id)  : 0;
+    int minRaise = maxBet + state.minRaise;
+    int maxRaise = myChips + myBet;
+    return { maxBet - myBet, minRaise, maxRaise, state.minRaise, minRaise <= maxRaise };
+}
+
 void InputHandler::drawButtons(const GameState& state)
 {
     // Guard: only draw when the engine is blocked waiting for this human.
     if (!m_humanPlayer.isWaitingForInput()) return;
 
-    PlayerId id = state.activePlayer;
-
-    int maxBet  = 0;
-    for (auto& [pid, bet] : state.currentBets)
-        maxBet = std::max(maxBet, bet);
-
-    int myBet    = state.currentBets.count(id) ? state.currentBets.at(id) : 0;
-    int myChips  = state.chipCounts.count(id)  ? state.chipCounts.at(id)  : 0;
-    int callCost = maxBet - myBet;
-    int minRaise = maxBet + state.minRaise;
-    int maxRaise = myChips + myBet;   // all-in total
-    bool canRaise = minRaise <= maxRaise;
+    auto [callCost, minRaise, maxRaise, step, canRaise] = computeBounds(state);
 
     // Keep m_raiseAmount in [minRaise, maxRaise]; re-initialise if stale.
     if (canRaise) {
@@ -104,16 +106,7 @@ void InputHandler::handleEvent(const sf::Event& event, const GameState& state)
     // Guard: ignore events when it is not the human's turn.
     if (!m_humanPlayer.isWaitingForInput()) return;
 
-    // Compute raise bounds (needed for stepper and scroll).
-    PlayerId id  = state.activePlayer;
-    int maxBet   = 0;
-    for (auto& [pid, bet] : state.currentBets)
-        maxBet = std::max(maxBet, bet);
-    int myBet    = state.currentBets.count(id) ? state.currentBets.at(id) : 0;
-    int myChips  = state.chipCounts.count(id)  ? state.chipCounts.at(id)  : 0;
-    int minRaise = maxBet + state.minRaise;
-    int maxRaise = myChips + myBet;
-    int step     = state.minRaise;
+    auto [callCost, minRaise, maxRaise, step, canRaise] = computeBounds(state);
 
     // Mouse wheel over the raise area adjusts the amount.
     if (event.type == sf::Event::MouseWheelScrolled) {
@@ -124,7 +117,7 @@ void InputHandler::handleEvent(const sf::Event& event, const GameState& state)
              static_cast<int>(event.mouseWheelScroll.y)});
         float mx = logical.x;
         float my = logical.y;
-        if (raiseArea.contains(mx, my) && minRaise <= maxRaise) {
+        if (raiseArea.contains(mx, my) && canRaise) {
             m_raiseAmount += static_cast<int>(event.mouseWheelScroll.delta) * step;
             m_raiseAmount = std::max(minRaise, std::min(maxRaise, m_raiseAmount));
         }
@@ -153,21 +146,27 @@ void InputHandler::handleEvent(const sf::Event& event, const GameState& state)
     }
 
     // Stepper: adjust raise amount without committing.
-    if (m_raiseMinusBtn.getGlobalBounds().contains(mx, my) && minRaise <= maxRaise) {
+    if (m_raiseMinusBtn.getGlobalBounds().contains(mx, my) && canRaise) {
         m_raiseAmount = std::max(minRaise, m_raiseAmount - step);
         return;
     }
 
-    if (m_raisePlusBtn.getGlobalBounds().contains(mx, my) && minRaise <= maxRaise) {
+    if (m_raisePlusBtn.getGlobalBounds().contains(mx, my) && canRaise) {
         m_raiseAmount = std::min(maxRaise, m_raiseAmount + step);
         return;
     }
 
-    // Raise button commits m_raiseAmount.
-    if (m_raiseBtn.getGlobalBounds().contains(mx, my) && minRaise <= maxRaise) {
-        int amount = (m_raiseAmount >= minRaise) ? m_raiseAmount : minRaise;
-        m_raiseAmount = 0;
-        m_humanPlayer.provideAction(Action{Action::Type::Raise, amount});
+    // Raise / All-in button.
+    if (m_raiseBtn.getGlobalBounds().contains(mx, my)) {
+        if (canRaise) {
+            int amount = (m_raiseAmount >= minRaise) ? m_raiseAmount : minRaise;
+            m_raiseAmount = 0;
+            m_humanPlayer.provideAction(Action{Action::Type::Raise, amount});
+        } else {
+            // Player can't meet the minimum raise but can still go all-in.
+            m_raiseAmount = 0;
+            m_humanPlayer.provideAction(Action{Action::Type::Raise, maxRaise});
+        }
     }
 }
 

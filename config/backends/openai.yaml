@@ -1,0 +1,6 @@
+model: "gpt-4o"
+endpoint: "https://api.openai.com"
+api_key: ""        # set your key here or via OPENAI_API_KEY env var
+connection_timeout: 10
+read_timeout: 60
+max_tokens: 64

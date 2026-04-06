@@ -28,6 +28,15 @@ private:
     sf::RectangleShape m_raiseMinusBtn;
     sf::RectangleShape m_raisePlusBtn;
     int m_raiseAmount = 0;   // total bet amount to submit; 0 = uninitialized
+
+    struct RaiseBounds {
+        int callCost;
+        int minRaise;
+        int maxRaise;
+        int step;
+        bool canRaise;
+    };
+    RaiseBounds computeBounds(const GameState& state) const;
 };
 
 } // namespace poker

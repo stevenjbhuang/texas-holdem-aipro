@@ -206,11 +206,13 @@ std::string ClaudeClient::sendPrompt(const std::string& prompt) {
 
 ---
 
-### Task 11.2: Implement `OpenAICompatibleClient`
+### Task 11.2: Implement `OpenAICompatibleClient` ✅ (completed in Phase 9)
 
 The OpenAI Chat Completions API is the de facto standard: Ollama, vLLM, llama.cpp server, LM Studio, and many others expose an OpenAI-compatible endpoint. One client implementation works for all of them.
 
-- [ ] Create `src/ai/OpenAIClient.hpp`:
+**Already implemented** as `src/ai/OpenAICompatibleClient.hpp/.cpp`. It replaced `OllamaClient` and is now the only LLM backend. See Task 9.5.
+
+~~- [ ] Create `src/ai/OpenAIClient.hpp`:~~
 
 ```cpp
 #pragma once

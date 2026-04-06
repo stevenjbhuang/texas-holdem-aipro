@@ -8,7 +8,7 @@ class MockLLMClient : public ILLMClient {
 public:
     std::string responseToReturn = "CALL";
 
-    std::string sendPrompt(const std::string&) override {
+    std::string sendPrompt(const std::string&, const std::string& = "") override {
         return responseToReturn;
     }
 };

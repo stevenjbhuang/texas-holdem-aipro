@@ -94,7 +94,7 @@ Swap in a fake implementation during tests:
 ```cpp
 class MockLLMClient : public ILLMClient {
 public:
-    std::string complete(const std::string&) override {
+    std::string sendPrompt(const std::string&, const std::string& = "") override {
         return "fold";  // always returns fold — predictable for testing
     }
 };
@@ -133,7 +133,7 @@ This is called **polymorphism** — one interface, many implementations.
 | Interface | Implementations | Used by |
 |-----------|----------------|---------|
 | `IPlayer` | `HumanPlayer`, `AIPlayer` | `GameEngine` |
-| `ILLMClient` | `OllamaClient`, `MockLLMClient` | `AIPlayer` |
+| `ILLMClient` | `OpenAICompatibleClient`, `MockLLMClient` | `AIPlayer` |
 
 Each layer only knows the interface — never the concrete type. This is the
 core of the decoupled architecture.
