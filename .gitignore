@@ -3,6 +3,9 @@ build/
 build-cov/
 coverage-html/
 out/
+docs/
+.claude/
+.superpowers/
 
 # CMake generated files (in-source build accidents)
 CMakeFiles/
